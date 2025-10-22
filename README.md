@@ -52,6 +52,17 @@ render.yaml             # IaC for Render deployment
 - Redis (local or remote)
 - S3-compatible storage (Cloudflare R2, MinIO, etc.)
 
+### Authentication (Development)
+
+The project uses a simple authentication middleware for development that automatically sets a default user for all requests. See `/src/auth/README.md` for details.
+
+To test with a specific user, add the `X-User-Id` header to your requests:
+```bash
+curl -H "X-User-Id: user-123" http://localhost:3000/api/...
+```
+
+⚠️ **Note:** This is for development only. Production requires proper JWT authentication (see Deployment Guide).
+
 ### Setup
 
 1. Clone repo:

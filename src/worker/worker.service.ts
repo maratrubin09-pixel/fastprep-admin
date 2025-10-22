@@ -137,11 +137,12 @@ export class WorkerService implements OnModuleDestroy {
         this.metrics.outboxProcessedTotal.inc({ status: 'done' });
       } else {
         // Ошибка: retry или failed
+        const errorMessage = result.error || 'Unknown error';
         if (row.attempts >= MAX_ATTEMPTS) {
-          await this.markFailed(client, row.id, result.error);
+          await this.markFailed(client, row.id, errorMessage);
           this.metrics.outboxProcessedTotal.inc({ status: 'failed' });
         } else {
-          await this.markRetry(client, row.id, row.attempts, result.error);
+          await this.markRetry(client, row.id, row.attempts, errorMessage);
           this.metrics.outboxProcessedTotal.inc({ status: 'retry' });
         }
       }
