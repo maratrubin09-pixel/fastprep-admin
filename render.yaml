@@ -133,11 +133,12 @@ services:
     envVars:
       - key: REACT_APP_API_URL
         value: https://fastprep-admin-api.onrender.com/api
-  # Redis Service
+ # Redis Service
   - type: redis
     name: fastprep-redis
     plan: starter
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
 
 # === Postgres Database ===
 databases:
