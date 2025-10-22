@@ -134,12 +134,17 @@ services:
       - key: REACT_APP_API_URL
         value: https://fastprep-admin-api.onrender.com/api
 
+# === Postgres Database ===
 databases:
   - name: fastprep-postgres
     databaseName: fastprep_admin
     plan: starter
 
-  - name: fastprep-redis
+# === Redis Service ===
+services:
+  - type: redis
+    name: fastprep-redis
     plan: starter
-    maxmemoryPolicy: noeviction
+    maxmemoryPolicy: allkeys-lru
+
 
