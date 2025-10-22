@@ -144,7 +144,7 @@ services:
 databases:
   - name: fastprep-postgres
     databaseName: fastprep_admin
-    plan: standard
+    plan: basic-1gb
 
 
 
