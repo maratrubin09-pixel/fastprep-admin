@@ -136,7 +136,7 @@ services:
  # Redis Service
   - type: redis
     name: fastprep-redis
-    plan: free
+    plan: starter
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
@@ -144,7 +144,7 @@ services:
 databases:
   - name: fastprep-postgres
     databaseName: fastprep_admin
-    plan: free
+    plan: standard
 
 
 
