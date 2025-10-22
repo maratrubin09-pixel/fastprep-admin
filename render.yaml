@@ -146,7 +146,6 @@ databases:
     plan: starter
 
 # === Redis Service ===
-services:
   - type: redis
     name: fastprep-redis
     plan: starter
