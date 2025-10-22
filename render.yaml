@@ -145,10 +145,5 @@ databases:
     databaseName: fastprep_admin
     plan: starter
 
-# === Redis Service ===
-  - type: redis
-    name: fastprep-redis
-    plan: starter
-    maxmemoryPolicy: allkeys-lru
 
 
