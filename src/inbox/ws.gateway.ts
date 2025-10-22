@@ -77,7 +77,7 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const data = (socket as any).data as SocketData | undefined;
       if (data?.userId === userId) {
         const ep = await this.authz.getEffectivePermissions(userId);
-        if (ep) {
+        if (ep && data) {
           data.ep = ep;
           socket.emit('ep.update', { ver: ep.ver, perms: ep.permissions });
         }
