@@ -1,0 +1,145 @@
+services:
+  # Backend API
+  - type: web
+    name: fastprep-admin-api
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: ./
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fastprep-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: fastprep-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CSRF_SECRET
+        generateValue: true
+      - key: APP_ORIGIN
+        value: https://admin.fastprepusa.com
+      - key: CORS_ORIGIN
+        value: https://admin.fastprepusa.com
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: TG_ADAPTER_URL
+        value: https://fastprep-tg-adapter.onrender.com
+      - key: TG_ADAPTER_TOKEN
+        sync: false
+    healthCheckPath: /api/health
+
+  # Outbox Worker
+  - type: worker
+    name: fastprep-admin-worker
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: ./
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fastprep-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: fastprep-redis
+          property: connectionString
+      - key: TG_ADAPTER_URL
+        value: https://fastprep-tg-adapter.onrender.com
+      - key: TG_ADAPTER_TOKEN
+        sync: false
+      - key: OUTBOX_BATCH_SIZE
+        value: 10
+      - key: OUTBOX_CONCURRENCY
+        value: 5
+      - key: OUTBOX_MAX_ATTEMPTS
+        value: 5
+      - key: OUTBOX_BASE_BACKOFF_MS
+        value: 1000
+      - key: OUTBOX_MAX_BACKOFF_MS
+        value: 60000
+      - key: METRICS_PORT
+        value: 9090
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: FAIL_ALERT_THRESHOLD
+        value: 10
+      - key: FAIL_ALERT_WINDOW_SEC
+        value: 300
+      - key: FAIL_ALERT_COOLDOWN_SEC
+        value: 3600
+
+  # TG Adapter (separate service with persistent disk)
+  # ВРЕМЕННО ОТКЛЮЧЕН - будет создан отдельно
+  # - type: web
+  #   name: fastprep-tg-adapter
+  #   runtime: node
+  #   region: oregon
+  #   plan: starter
+  #   buildCommand: npm install && npm run build
+  #   startCommand: npm start
+  #   disk:
+  #     name: tdlib-data
+  #     mountPath: /var/data/tdlib
+  #     sizeGB: 1
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: TG_API_ID
+  #       sync: false
+  #     - key: TG_API_HASH
+  #       sync: false
+  #     - key: TDLIB_ENCRYPTION_KEY
+  #       sync: false
+  #     - key: TDLIB_DIR
+  #       value: /var/data/tdlib
+  #     - key: SERVICE_JWT
+  #       generateValue: true
+  #     - key: BACKEND_URL
+  #       value: https://fastprep-admin-api.onrender.com
+
+  # Frontend (static site placeholder)
+  - type: web
+    name: fastprep-admin-frontend
+    runtime: static
+    rootDir: ./frontend
+    buildCommand: npm run build
+    staticPublishPath: ./build
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://fastprep-admin-api.onrender.com/api
+
+databases:
+  - name: fastprep-postgres
+    databaseName: fastprep_admin
+    plan: starter
+
+  - name: fastprep-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+
