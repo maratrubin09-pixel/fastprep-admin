@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { Pool } from 'pg';
+import { PG_POOL } from '../db/db.module';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly pool: Pool) {}
+  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   async login(email: string, password: string): Promise<any> {
     // Простая проверка: найти пользователя по email

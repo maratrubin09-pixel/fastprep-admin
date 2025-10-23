@@ -8,10 +8,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
 const pg_1 = require("pg");
+const db_module_1 = require("../db/db.module");
 let AuthService = class AuthService {
     pool;
     constructor(pool) {
@@ -73,6 +77,7 @@ let AuthService = class AuthService {
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
+    __param(0, (0, common_1.Inject)(db_module_1.PG_POOL)),
     __metadata("design:paramtypes", [pg_1.Pool])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map
