@@ -61,7 +61,7 @@ export class InitDbController {
         VALUES ($1, $2, $3)
         ON CONFLICT (email) DO NOTHING
         RETURNING id
-      `, ['admin@fastprepusa.com', 'test123', 'Admin User']);
+      `, ['marat@fastprepusa.com', 'test123', 'Marat Rubin']);
 
       // Assign role
       if (userResult.rows.length > 0) {
@@ -81,7 +81,7 @@ export class InitDbController {
         success: true,
         message: 'Database initialized successfully',
         credentials: {
-          email: 'admin@fastprepusa.com',
+          email: 'marat@fastprepusa.com',
           password: 'test123',
         },
       };
