@@ -1,70 +1,231 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Client, LocalAuth } from 'whatsapp-web.js';
+import * as qrcode from 'qrcode';
+
+interface WhatsAppSession {
+  client: Client;
+  status: 'initializing' | 'qr_ready' | 'authenticated' | 'ready' | 'disconnected';
+  qrCode?: string;
+  accountInfo?: any;
+  createdAt: Date;
+}
 
 @Injectable()
-export class WhatsAppService {
-  private sessions = new Map<string, any>();
+export class WhatsAppService implements OnModuleInit {
+  private sessions = new Map<string, WhatsAppSession>();
+
+  async onModuleInit() {
+    console.log('WhatsAppService initialized');
+  }
 
   async initConnection(userId: string, data: any) {
-    // TODO: Implement real WhatsApp Web connection using whatsapp-web.js or similar
-    // For now, return mock QR code
-    const sessionId = `whatsapp_${userId}_${Date.now()}`;
-    
-    this.sessions.set(userId, {
-      sessionId,
-      status: 'pending',
-      qrCode: 'mock_qr_code_data',
-      createdAt: new Date(),
+    // Check if session already exists
+    if (this.sessions.has(userId)) {
+      const existingSession = this.sessions.get(userId);
+      if (existingSession.status === 'ready') {
+        return {
+          message: 'Already connected',
+          status: 'ready',
+          accountInfo: existingSession.accountInfo,
+        };
+      }
+      // If not ready, destroy and recreate
+      await this.disconnect(userId);
+    }
+
+    // Create new WhatsApp client
+    const client = new Client({
+      authStrategy: new LocalAuth({
+        clientId: `user_${userId}`,
+      }),
+      puppeteer: {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu',
+        ],
+      },
     });
 
-    return {
-      sessionId,
-      qrCode: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23f0f0f0"/><text x="50%" y="50%" font-size="12" text-anchor="middle" dy=".3em">WhatsApp QR Code</text></svg>',
-      message: 'Scan QR code with WhatsApp on your phone',
+    const session: WhatsAppSession = {
+      client,
+      status: 'initializing',
+      createdAt: new Date(),
     };
+
+    this.sessions.set(userId, session);
+
+    // Set up event handlers
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('QR code generation timeout'));
+      }, 60000); // 60 second timeout
+
+      client.on('qr', async (qr) => {
+        try {
+          console.log(`QR code generated for user ${userId}`);
+          const qrCodeDataUrl = await qrcode.toDataURL(qr);
+          session.qrCode = qrCodeDataUrl;
+          session.status = 'qr_ready';
+          
+          clearTimeout(timeout);
+          resolve({
+            sessionId: userId,
+            qrCode: qrCodeDataUrl,
+            message: 'Scan this QR code with WhatsApp on your phone',
+            status: 'qr_ready',
+          });
+        } catch (err) {
+          console.error('Error generating QR code:', err);
+          reject(err);
+        }
+      });
+
+      client.on('authenticated', () => {
+        console.log(`WhatsApp authenticated for user ${userId}`);
+        session.status = 'authenticated';
+      });
+
+      client.on('ready', async () => {
+        console.log(`WhatsApp ready for user ${userId}`);
+        session.status = 'ready';
+        
+        // Get account info
+        const info = client.info;
+        session.accountInfo = {
+          phoneNumber: info.wid.user,
+          pushname: info.pushname,
+          platform: info.platform,
+        };
+      });
+
+      client.on('disconnected', (reason) => {
+        console.log(`WhatsApp disconnected for user ${userId}:`, reason);
+        session.status = 'disconnected';
+        this.sessions.delete(userId);
+      });
+
+      client.on('auth_failure', (msg) => {
+        console.error(`WhatsApp auth failure for user ${userId}:`, msg);
+        session.status = 'disconnected';
+        clearTimeout(timeout);
+        reject(new Error('Authentication failed'));
+      });
+
+      // Initialize the client
+      client.initialize().catch((err) => {
+        console.error('Error initializing WhatsApp client:', err);
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
   }
 
   async getQrCode(userId: string) {
     const session = this.sessions.get(userId);
     if (!session) {
-      throw new Error('No active session found');
+      throw new Error('No active session found. Please initiate connection first.');
+    }
+
+    if (!session.qrCode) {
+      throw new Error('QR code not yet generated. Please wait...');
     }
 
     return session.qrCode;
   }
 
   async verifyConnection(userId: string) {
-    // TODO: Check if WhatsApp connection was successful
-    // For demo, return true after 5 seconds
     const session = this.sessions.get(userId);
     if (!session) return false;
 
-    const elapsed = Date.now() - session.createdAt.getTime();
-    return elapsed > 5000; // Simulate connection after 5 seconds
+    return session.status === 'ready';
   }
 
   async getAccountInfo(userId: string) {
-    // TODO: Get real WhatsApp account info
-    return {
-      accountName: 'WhatsApp Business',
-      phoneNumber: '+1234567890',
-      connectedAt: new Date(),
-    };
+    const session = this.sessions.get(userId);
+    if (!session || !session.accountInfo) {
+      throw new Error('No account info available');
+    }
+
+    return session.accountInfo;
   }
 
   async disconnect(userId: string) {
-    // TODO: Properly disconnect WhatsApp session
+    const session = this.sessions.get(userId);
+    if (session && session.client) {
+      try {
+        await session.client.destroy();
+      } catch (err) {
+        console.error('Error destroying WhatsApp client:', err);
+      }
+    }
     this.sessions.delete(userId);
   }
 
   async sendMessage(userId: string, to: string, message: string) {
-    // TODO: Implement message sending
-    console.log(`Sending WhatsApp message from ${userId} to ${to}: ${message}`);
-    return { success: true, messageId: `wa_${Date.now()}` };
+    const session = this.sessions.get(userId);
+    if (!session || session.status !== 'ready') {
+      throw new Error('WhatsApp not connected');
+    }
+
+    try {
+      const chatId = to.includes('@c.us') ? to : `${to}@c.us`;
+      const result = await session.client.sendMessage(chatId, message);
+      return { 
+        success: true, 
+        messageId: result.id.id,
+        timestamp: result.timestamp,
+      };
+    } catch (err) {
+      console.error('Error sending WhatsApp message:', err);
+      throw new Error('Failed to send message');
+    }
   }
 
   async getMessages(userId: string, chatId: string) {
-    // TODO: Fetch messages from WhatsApp
-    return [];
+    const session = this.sessions.get(userId);
+    if (!session || session.status !== 'ready') {
+      throw new Error('WhatsApp not connected');
+    }
+
+    try {
+      const chat = await session.client.getChatById(chatId);
+      const messages = await chat.fetchMessages({ limit: 50 });
+      
+      return messages.map(msg => ({
+        id: msg.id.id,
+        from: msg.from,
+        to: msg.to,
+        body: msg.body,
+        timestamp: msg.timestamp,
+        fromMe: msg.fromMe,
+      }));
+    } catch (err) {
+      console.error('Error fetching WhatsApp messages:', err);
+      return [];
+    }
+  }
+
+  async getStatus(userId: string) {
+    const session = this.sessions.get(userId);
+    if (!session) {
+      return {
+        connected: false,
+        status: 'disconnected',
+      };
+    }
+
+    return {
+      connected: session.status === 'ready',
+      status: session.status,
+      accountInfo: session.accountInfo,
+    };
   }
 }
 
