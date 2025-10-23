@@ -7,6 +7,7 @@ import DashboardHomePage from './pages/DashboardHomePage';
 import MyProfilePage from './pages/MyProfilePage';
 import UserManagementPage from './pages/UserManagementPage';
 import SettingsPage from './pages/SettingsPage';
+import MessengerSettingsPage from './pages/MessengerSettingsPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import PrivateRoute from './components/PrivateRoute';
 
@@ -163,7 +164,7 @@ function App() {
             path="/settings/messengers"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="Messenger Settings" description="Configure messenger integrations" />
+                <MessengerSettingsPage />
               </PrivateRoute>
             }
           />
