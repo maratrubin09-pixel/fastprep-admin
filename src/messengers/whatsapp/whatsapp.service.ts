@@ -79,17 +79,20 @@ export class WhatsAppService implements OnModuleInit {
           reject(new Error('QR code generation timeout'));
         }, 60000); // 60 second timeout
 
+        let qrResolved = false; // Flag to ensure we only resolve once
+
         // QR Code event
         sock.ev.on('connection.update', async (update) => {
           const { connection, lastDisconnect, qr } = update;
 
-          if (qr) {
+          if (qr && !qrResolved) {
             console.log(`QR code generated for user ${userId}`);
             try {
               const qrCodeDataUrl = await qrcode.toDataURL(qr);
               session.qrCode = qrCodeDataUrl;
               session.status = 'qr_ready';
 
+              qrResolved = true; // Mark as resolved
               clearTimeout(timeout);
               resolve({
                 sessionId: userId,
@@ -100,6 +103,15 @@ export class WhatsAppService implements OnModuleInit {
             } catch (err) {
               console.error('Error generating QR code:', err);
               reject(err);
+            }
+          } else if (qr && qrResolved) {
+            // Update session with new QR but don't resolve again
+            console.log(`QR code updated for user ${userId}`);
+            try {
+              const qrCodeDataUrl = await qrcode.toDataURL(qr);
+              session.qrCode = qrCodeDataUrl;
+            } catch (err) {
+              console.error('Error updating QR code:', err);
             }
           }
 
