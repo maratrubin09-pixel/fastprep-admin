@@ -38,7 +38,7 @@
     "socket.io": "^4.7.5",
     "typescript": "^5.4.5",
     "uuid": "^9.0.1",
-    "whatsapp-web.js": "^1.23.0",
+    "@whiskeysockets/baileys": "^6.7.0",
     "qrcode": "^1.5.3",
     "telegram": "^2.19.8"
   },

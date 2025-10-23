@@ -192,11 +192,11 @@ const MessengerSettingsPage = () => {
       
       // Update messengers with backend data
       setMessengers(messengers.map(m => {
-        const backendData = data.messengers.find(bm => bm.platform === m.id);
+        const backendData = data.messengers?.[m.id]; // Access by key instead of find
         return {
           ...m,
-          isConnected: backendData?.isConnected || false,
-          connectionDetails: backendData?.connectionDetails || null,
+          isConnected: backendData?.connected || false,
+          connectionDetails: backendData?.accountName || null,
         };
       }));
     } catch (err) {

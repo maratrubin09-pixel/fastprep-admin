@@ -1,9 +1,18 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import { Injectable, OnModuleInit, Inject } from '@nestjs/common';
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
+} from '@whiskeysockets/baileys';
 import * as qrcode from 'qrcode';
+import { Pool } from 'pg';
+import { PG_POOL } from '../../db/db.module';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface WhatsAppSession {
-  client: Client;
+  sock: any;
   status: 'initializing' | 'qr_ready' | 'authenticated' | 'ready' | 'disconnected';
   qrCode?: string;
   accountInfo?: any;
@@ -13,9 +22,17 @@ interface WhatsAppSession {
 @Injectable()
 export class WhatsAppService implements OnModuleInit {
   private sessions = new Map<string, WhatsAppSession>();
+  private authDir = path.join(process.cwd(), 'auth_sessions');
+
+  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   async onModuleInit() {
-    console.log('WhatsAppService initialized');
+    console.log('WhatsAppService initialized (baileys)');
+    
+    // Create auth directory if it doesn't exist
+    if (!fs.existsSync(this.authDir)) {
+      fs.mkdirSync(this.authDir, { recursive: true });
+    }
   }
 
   async initConnection(userId: string, data: any) {
@@ -33,98 +50,118 @@ export class WhatsAppService implements OnModuleInit {
       await this.disconnect(userId);
     }
 
-    // Create new WhatsApp client
-    const client = new Client({
-      authStrategy: new LocalAuth({
-        clientId: `user_${userId}`,
-      }),
-      puppeteer: {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-          '--disable-gpu',
-        ],
-      },
-    });
+    const sessionDir = path.join(this.authDir, `session_${userId}`);
+    
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+      const { version } = await fetchLatestBaileysVersion();
 
-    const session: WhatsAppSession = {
-      client,
-      status: 'initializing',
-      createdAt: new Date(),
-    };
-
-    this.sessions.set(userId, session);
-
-    // Set up event handlers
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('QR code generation timeout'));
-      }, 60000); // 60 second timeout
-
-      client.on('qr', async (qr) => {
-        try {
-          console.log(`QR code generated for user ${userId}`);
-          const qrCodeDataUrl = await qrcode.toDataURL(qr);
-          session.qrCode = qrCodeDataUrl;
-          session.status = 'qr_ready';
-          
-          clearTimeout(timeout);
-          resolve({
-            sessionId: userId,
-            qrCode: qrCodeDataUrl,
-            message: 'Scan this QR code with WhatsApp on your phone',
-            status: 'qr_ready',
-          });
-        } catch (err) {
-          console.error('Error generating QR code:', err);
-          reject(err);
-        }
+      const sock = makeWASocket({
+        version,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, console as any),
+        },
+        printQRInTerminal: false,
+        generateHighQualityLinkPreview: true,
       });
 
-      client.on('authenticated', () => {
-        console.log(`WhatsApp authenticated for user ${userId}`);
-        session.status = 'authenticated';
-      });
+      const session: WhatsAppSession = {
+        sock,
+        status: 'initializing',
+        createdAt: new Date(),
+      };
 
-      client.on('ready', async () => {
-        console.log(`WhatsApp ready for user ${userId}`);
-        session.status = 'ready';
-        
-        // Get account info
-        const info = client.info;
-        session.accountInfo = {
-          phoneNumber: info.wid.user,
-          pushname: info.pushname,
-          platform: info.platform,
-        };
-      });
+      this.sessions.set(userId, session);
 
-      client.on('disconnected', (reason) => {
-        console.log(`WhatsApp disconnected for user ${userId}:`, reason);
-        session.status = 'disconnected';
-        this.sessions.delete(userId);
-      });
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('QR code generation timeout'));
+        }, 60000); // 60 second timeout
 
-      client.on('auth_failure', (msg) => {
-        console.error(`WhatsApp auth failure for user ${userId}:`, msg);
-        session.status = 'disconnected';
-        clearTimeout(timeout);
-        reject(new Error('Authentication failed'));
-      });
+        // QR Code event
+        sock.ev.on('connection.update', async (update) => {
+          const { connection, lastDisconnect, qr } = update;
 
-      // Initialize the client
-      client.initialize().catch((err) => {
-        console.error('Error initializing WhatsApp client:', err);
-        clearTimeout(timeout);
-        reject(err);
+          if (qr) {
+            console.log(`QR code generated for user ${userId}`);
+            try {
+              const qrCodeDataUrl = await qrcode.toDataURL(qr);
+              session.qrCode = qrCodeDataUrl;
+              session.status = 'qr_ready';
+
+              clearTimeout(timeout);
+              resolve({
+                sessionId: userId,
+                qrCode: qrCodeDataUrl,
+                message: 'Scan this QR code with WhatsApp on your phone',
+                status: 'qr_ready',
+              });
+            } catch (err) {
+              console.error('Error generating QR code:', err);
+              reject(err);
+            }
+          }
+
+          if (connection === 'close') {
+            const shouldReconnect =
+              (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+            
+            console.log(
+              `WhatsApp connection closed for user ${userId}, reconnect: ${shouldReconnect}`
+            );
+
+            if (shouldReconnect) {
+              // Don't auto-reconnect, let user manually reconnect
+              session.status = 'disconnected';
+            } else {
+              session.status = 'disconnected';
+              this.sessions.delete(userId);
+            }
+          }
+
+          if (connection === 'open') {
+            console.log(`WhatsApp connected for user ${userId}`);
+            session.status = 'ready';
+
+            // Get account info
+            try {
+              const me = sock.user;
+              if (me) {
+                session.accountInfo = {
+                  phoneNumber: me.id.split(':')[0],
+                  name: me.name || me.id,
+                  platform: 'WhatsApp',
+                };
+
+                // Save to database
+                await this.pool.query(
+                  `INSERT INTO messenger_connections (user_id, platform, status, connection_data, connected_at)
+                   VALUES ($1, 'whatsapp', 'connected', $2, NOW())
+                   ON CONFLICT (user_id, platform)
+                   DO UPDATE SET status = 'connected', connection_data = $2, connected_at = NOW()`,
+                  [userId, JSON.stringify(session.accountInfo)]
+                );
+              }
+            } catch (err) {
+              console.error('Error saving account info:', err);
+            }
+          }
+        });
+
+        // Credentials update
+        sock.ev.on('creds.update', saveCreds);
+
+        // Messages (for future inbox integration)
+        sock.ev.on('messages.upsert', async (m) => {
+          console.log(`New messages for user ${userId}:`, m.messages.length);
+          // TODO: Save to database for unified inbox
+        });
       });
-    });
+    } catch (err) {
+      console.error('Error initializing WhatsApp:', err);
+      throw new Error(`Failed to initialize WhatsApp: ${err.message}`);
+    }
   }
 
   async getQrCode(userId: string) {
@@ -158,14 +195,29 @@ export class WhatsAppService implements OnModuleInit {
 
   async disconnect(userId: string) {
     const session = this.sessions.get(userId);
-    if (session && session.client) {
+    if (session && session.sock) {
       try {
-        await session.client.destroy();
+        await session.sock.logout();
       } catch (err) {
-        console.error('Error destroying WhatsApp client:', err);
+        console.error('Error logging out from WhatsApp:', err);
       }
     }
+    
+    // Clean up session directory
+    const sessionDir = path.join(this.authDir, `session_${userId}`);
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+
     this.sessions.delete(userId);
+
+    // Update database
+    await this.pool.query(
+      `UPDATE messenger_connections
+       SET status = 'disconnected', connected_at = NULL
+       WHERE user_id = $1 AND platform = 'whatsapp'`,
+      [userId]
+    );
   }
 
   async sendMessage(userId: string, to: string, message: string) {
@@ -175,12 +227,13 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     try {
-      const chatId = to.includes('@c.us') ? to : `${to}@c.us`;
-      const result = await session.client.sendMessage(chatId, message);
-      return { 
-        success: true, 
-        messageId: result.id.id,
-        timestamp: result.timestamp,
+      const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
+      const result = await session.sock.sendMessage(jid, { text: message });
+      
+      return {
+        success: true,
+        messageId: result.key.id,
+        timestamp: result.messageTimestamp,
       };
     } catch (err) {
       console.error('Error sending WhatsApp message:', err);
@@ -194,22 +247,10 @@ export class WhatsAppService implements OnModuleInit {
       throw new Error('WhatsApp not connected');
     }
 
-    try {
-      const chat = await session.client.getChatById(chatId);
-      const messages = await chat.fetchMessages({ limit: 50 });
-      
-      return messages.map(msg => ({
-        id: msg.id.id,
-        from: msg.from,
-        to: msg.to,
-        body: msg.body,
-        timestamp: msg.timestamp,
-        fromMe: msg.fromMe,
-      }));
-    } catch (err) {
-      console.error('Error fetching WhatsApp messages:', err);
-      return [];
-    }
+    // Baileys doesn't have direct message history fetch like whatsapp-web.js
+    // Messages are received via events and should be stored in database
+    // For now, return empty array
+    return [];
   }
 
   async getStatus(userId: string) {
@@ -228,4 +269,3 @@ export class WhatsAppService implements OnModuleInit {
     };
   }
 }
-
