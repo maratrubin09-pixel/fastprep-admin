@@ -16,8 +16,8 @@ export class InitDbController {
       const schemaSql = fs.readFileSync(schemaPath, 'utf8');
       await this.pool.query(schemaSql);
 
-      // Read and execute seed
-      const seedPath = path.join(__dirname, '../../migrations/002_seed_test_user.sql');
+      // Read and execute simple seed
+      const seedPath = path.join(__dirname, '../../migrations/003_seed_simple.sql');
       const seedSql = fs.readFileSync(seedPath, 'utf8');
       await this.pool.query(seedSql);
 
@@ -33,6 +33,7 @@ export class InitDbController {
       return {
         success: false,
         error: error.message,
+        stack: error.stack,
       };
     }
   }
