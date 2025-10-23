@@ -32,7 +32,7 @@ export class MessengersController {
     const token = authHeader.substring(7);
     try {
       const result = await this.messengersService.connect(token, platform, body);
-      return { success: true, ...result };
+      return { success: true, result };
     } catch (err: any) {
       throw new HttpException(
         { message: err.message || 'Failed to connect' },
@@ -74,7 +74,7 @@ export class MessengersController {
     const token = authHeader.substring(7);
     try {
       const result = await this.messengersService.verify(token, platform);
-      return { success: true, ...result };
+      return { success: true, result };
     } catch (err: any) {
       throw new HttpException(
         { message: err.message || 'Failed to verify' },
