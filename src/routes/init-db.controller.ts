@@ -11,21 +11,38 @@ export class InitDbController {
   @Post()
   async initializeDatabase() {
     try {
-      // Execute schema creation - split by semicolon and execute one by one
-      const schemaPath = path.join(__dirname, '../../migrations/001_initial_schema.sql');
-      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-      
-      // Split SQL into individual statements
-      const statements = schemaSql
-        .split(';')
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith('--'));
-      
-      for (const stmt of statements) {
-        if (stmt) {
-          await this.pool.query(stmt);
-        }
-      }
+      // Create tables directly
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) UNIQUE NOT NULL,
+          permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255),
+          perm_version INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS user_roles (
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+          PRIMARY KEY (user_id, role_id)
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
 
       // Create role
       await this.pool.query(`
