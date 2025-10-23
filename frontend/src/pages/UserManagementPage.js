@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  Container,
   Box,
   Typography,
   Paper,
   Button,
-  AppBar,
-  Toolbar,
   Alert,
   Table,
   TableBody,
@@ -28,18 +24,16 @@ import {
   Chip,
 } from '@mui/material';
 import {
-  ArrowBack,
   Add,
   Edit,
   Delete,
   Person,
 } from '@mui/icons-material';
-import ProfileMenu from '../components/ProfileMenu';
+import DashboardLayout from '../components/DashboardLayout';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
 const UserManagementPage = () => {
-  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -209,25 +203,8 @@ const UserManagementPage = () => {
   };
 
   return (
-    <>
-      <AppBar position="static">
-        <Toolbar>
-          <Button
-            color="inherit"
-            startIcon={<ArrowBack />}
-            onClick={() => navigate('/dashboard')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            User Management
-          </Typography>
-          <ProfileMenu user={user} />
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <DashboardLayout title="User Management">
+      <Box>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
           <Typography variant="h4">
             Users
@@ -320,7 +297,6 @@ const UserManagementPage = () => {
             </TableBody>
           </Table>
         </TableContainer>
-      </Container>
 
       {/* Add/Edit User Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
@@ -380,7 +356,8 @@ const UserManagementPage = () => {
           </DialogActions>
         </form>
       </Dialog>
-    </>
+      </Box>
+    </DashboardLayout>
   );
 };
 

@@ -1,21 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container,
   Box,
   Typography,
   Paper,
   TextField,
   Button,
-  AppBar,
-  Toolbar,
   Alert,
   Grid,
   Avatar,
   Divider,
 } from '@mui/material';
-import { ArrowBack, Save } from '@mui/icons-material';
-import ProfileMenu from '../components/ProfileMenu';
+import { Save } from '@mui/icons-material';
+import DashboardLayout from '../components/DashboardLayout';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
@@ -133,25 +130,8 @@ const MyProfilePage = () => {
   };
 
   return (
-    <>
-      <AppBar position="static">
-        <Toolbar>
-          <Button
-            color="inherit"
-            startIcon={<ArrowBack />}
-            onClick={() => navigate('/dashboard')}
-            sx={{ mr: 2 }}
-          >
-            Back
-          </Button>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            My Profile
-          </Typography>
-          <ProfileMenu user={user} />
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
+    <DashboardLayout title="My Profile">
+      <Box maxWidth="md" sx={{ mx: 'auto' }}>
         <Paper sx={{ p: 4 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
             <Avatar
@@ -274,8 +254,8 @@ const MyProfilePage = () => {
             </Box>
           </Box>
         </Paper>
-      </Container>
-    </>
+      </Box>
+    </DashboardLayout>
   );
 };
 
