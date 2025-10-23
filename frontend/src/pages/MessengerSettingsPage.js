@@ -153,47 +153,198 @@ const MessengerSettingsPage = () => {
   const [qrDialog, setQrDialog] = useState(false);
   const [selectedMessenger, setSelectedMessenger] = useState(null);
   const [qrCode, setQrCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyInterval, setVerifyInterval] = useState(null);
+
+  // Load messenger status on mount
+  useEffect(() => {
+    loadMessengerStatus();
+  }, []);
+
+  // Cleanup verification interval on unmount
+  useEffect(() => {
+    return () => {
+      if (verifyInterval) {
+        clearInterval(verifyInterval);
+      }
+    };
+  }, [verifyInterval]);
+
+  const loadMessengerStatus = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/messengers/status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load messenger status');
+      }
+
+      const data = await response.json();
+      
+      // Update messengers with backend data
+      setMessengers(messengers.map(m => {
+        const backendData = data.messengers.find(bm => bm.platform === m.id);
+        return {
+          ...m,
+          isConnected: backendData?.isConnected || false,
+          connectionDetails: backendData?.connectionDetails || null,
+        };
+      }));
+    } catch (err) {
+      console.error('Failed to load messenger status:', err);
+      setError('Failed to load messenger status');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleConnect = async (messengerId) => {
     const messenger = messengers.find(m => m.id === messengerId);
     setSelectedMessenger(messenger);
+    setError('');
+    setLoading(true);
     
-    // For now, show a dialog with instructions
-    // Later will implement actual QR code generation
-    setQrDialog(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/messengers/${messengerId}/connect`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to initiate connection');
+      }
+
+      const data = await response.json();
+      setQrCode(data.qrCode || '');
+      setQrDialog(true);
+      
+      // Start verification polling
+      startVerificationPolling(messengerId);
+    } catch (err) {
+      setError(err.message || 'Failed to connect');
+      console.error('Connection error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startVerificationPolling = (messengerId) => {
+    setVerifying(true);
     
-    // Simulate QR code (placeholder)
-    setQrCode(`data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='200' height='200' fill='%23f0f0f0'/><text x='50%' y='50%' font-size='14' text-anchor='middle' dy='.3em'>QR Code for ${messenger.name}</text></svg>`);
+    const interval = setInterval(async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/api/messengers/${messengerId}/verify`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Verification failed');
+        }
+
+        const data = await response.json();
+        
+        if (data.connected) {
+          // Connection successful!
+          clearInterval(interval);
+          setVerifying(false);
+          setQrDialog(false);
+          
+          // Update messenger status
+          setMessengers(messengers.map(m => 
+            m.id === messengerId 
+              ? { 
+                  ...m, 
+                  isConnected: true, 
+                  connectionDetails: data.accountInfo?.accountName || `${m.name} Account`
+                }
+              : m
+          ));
+          
+          // Reload full status
+          loadMessengerStatus();
+        }
+      } catch (err) {
+        console.error('Verification error:', err);
+      }
+    }, 3000); // Check every 3 seconds
+
+    setVerifyInterval(interval);
+
+    // Auto-stop after 2 minutes
+    setTimeout(() => {
+      if (interval) {
+        clearInterval(interval);
+        setVerifying(false);
+      }
+    }, 120000);
   };
 
   const handleDisconnect = async (messengerId) => {
-    if (window.confirm('Are you sure you want to disconnect this messenger?')) {
+    if (!window.confirm('Are you sure you want to disconnect this messenger?')) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/messengers/${messengerId}/disconnect`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect');
+      }
+
+      // Update local state
       setMessengers(messengers.map(m => 
         m.id === messengerId 
           ? { ...m, isConnected: false, connectionDetails: null }
           : m
       ));
+      
+      // Reload full status
+      loadMessengerStatus();
+    } catch (err) {
+      setError(err.message || 'Failed to disconnect');
+      console.error('Disconnect error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleCloseQrDialog = () => {
+    // Stop verification polling
+    if (verifyInterval) {
+      clearInterval(verifyInterval);
+      setVerifyInterval(null);
+    }
+    
     setQrDialog(false);
     setSelectedMessenger(null);
     setQrCode('');
-  };
-
-  const handleConfirmConnection = () => {
-    // Simulate successful connection
-    setMessengers(messengers.map(m => 
-      m.id === selectedMessenger.id 
-        ? { 
-            ...m, 
-            isConnected: true, 
-            connectionDetails: `${m.name} Account (Demo)` 
-          }
-        : m
-    ));
-    handleCloseQrDialog();
+    setVerifying(false);
   };
 
   return (
@@ -206,6 +357,12 @@ const MessengerSettingsPage = () => {
           Integrate your messaging platforms to manage all conversations in one place
         </Typography>
       </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
@@ -232,6 +389,12 @@ const MessengerSettingsPage = () => {
           Connect {selectedMessenger?.name}
         </DialogTitle>
         <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          
           <Box sx={{ textAlign: 'center', py: 3 }}>
             <QrCode2 sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
@@ -241,37 +404,62 @@ const MessengerSettingsPage = () => {
               Open {selectedMessenger?.name} on your phone and scan this QR code to connect
             </Typography>
             
-            {/* Placeholder for QR code */}
-            <Box
-              sx={{
-                width: 200,
-                height: 200,
-                mx: 'auto',
-                backgroundColor: 'grey.100',
-                borderRadius: 2,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                mb: 2,
-              }}
-            >
-              <Typography color="text.secondary">
-                QR Code will appear here
-              </Typography>
-            </Box>
+            {/* QR Code */}
+            {qrCode ? (
+              <Box
+                sx={{
+                  width: 200,
+                  height: 200,
+                  mx: 'auto',
+                  backgroundColor: 'white',
+                  borderRadius: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mb: 2,
+                  border: '1px solid #e0e0e0',
+                }}
+              >
+                <img 
+                  src={qrCode} 
+                  alt="QR Code" 
+                  style={{ width: '100%', height: '100%' }}
+                />
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  width: 200,
+                  height: 200,
+                  mx: 'auto',
+                  backgroundColor: 'grey.100',
+                  borderRadius: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mb: 2,
+                }}
+              >
+                <Typography color="text.secondary">
+                  {loading ? 'Loading QR Code...' : 'QR Code'}
+                </Typography>
+              </Box>
+            )}
 
-            <Alert severity="warning" sx={{ textAlign: 'left' }}>
-              <Typography variant="caption">
-                <strong>For demo purposes:</strong> Click "Confirm Connection" below to simulate a successful connection. 
-                Real QR code integration will be implemented in the backend.
-              </Typography>
-            </Alert>
+            {verifying && (
+              <Alert severity="info" sx={{ textAlign: 'left' }}>
+                <Typography variant="body2">
+                  <strong>Waiting for connection...</strong> 
+                  <br />
+                  The page will automatically update when you scan the QR code.
+                </Typography>
+              </Alert>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseQrDialog}>Cancel</Button>
-          <Button onClick={handleConfirmConnection} variant="contained" color="primary">
-            Confirm Connection (Demo)
+          <Button onClick={handleCloseQrDialog} disabled={loading}>
+            {verifying ? 'Stop Waiting' : 'Cancel'}
           </Button>
         </DialogActions>
       </Dialog>
