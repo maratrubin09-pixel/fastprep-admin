@@ -137,11 +137,12 @@ export class WorkerService implements OnModuleDestroy {
         this.metrics.outboxProcessedTotal.inc({ status: 'done' });
       } else {
         // Ошибка: retry или failed
+        const errorMsg = result.error || 'Unknown error';
         if (row.attempts >= MAX_ATTEMPTS) {
-          await this.markFailed(client, row.id, result.error);
+          await this.markFailed(client, row.id, errorMsg);
           this.metrics.outboxProcessedTotal.inc({ status: 'failed' });
         } else {
-          await this.markRetry(client, row.id, row.attempts, result.error);
+          await this.markRetry(client, row.id, row.attempts, errorMsg);
           this.metrics.outboxProcessedTotal.inc({ status: 'retry' });
         }
       }
@@ -190,7 +191,7 @@ export class WorkerService implements OnModuleDestroy {
         return { success: false, error: `HTTP ${response.status}: ${errText}` };
       }
 
-      const data = await response.json();
+      const data: any = await response.json();
       return { success: true, externalMessageId: data.messageId || 'unknown' };
     } catch (err: any) {
       return { success: false, error: err.message };

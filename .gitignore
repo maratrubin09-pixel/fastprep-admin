@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-dist/
+# dist/  (temporarily allowing dist/ for pre-built deploy)
 build/
 
 # Environment variables
