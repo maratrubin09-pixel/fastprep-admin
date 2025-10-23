@@ -1,20 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Box,
   Typography,
-  Button,
   Paper,
   AppBar,
   Toolbar,
   Alert,
 } from '@mui/material';
+import ProfileMenu from '../components/ProfileMenu';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
 const DashboardPage = () => {
-  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [error, setError] = useState('');
 
@@ -44,11 +42,6 @@ const DashboardPage = () => {
     fetchUser();
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/login');
-  };
-
   return (
     <>
       <AppBar position="static">
@@ -56,9 +49,7 @@ const DashboardPage = () => {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             FastPrep Admin Dashboard
           </Typography>
-          <Button color="inherit" onClick={handleLogout}>
-            Logout
-          </Button>
+          <ProfileMenu user={user} />
         </Toolbar>
       </AppBar>
 

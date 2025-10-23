@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Headers, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Put, Body, Headers, HttpException, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
@@ -32,6 +32,27 @@ export class AuthController {
       throw new HttpException(
         { message: err.message || 'Invalid token' },
         HttpStatus.UNAUTHORIZED
+      );
+    }
+  }
+
+  @Put('profile')
+  async updateProfile(
+    @Headers('authorization') authHeader: string,
+    @Body() body: { name?: string; email?: string; currentPassword?: string; newPassword?: string }
+  ) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      const user = await this.authService.updateProfile(token, body);
+      return user;
+    } catch (err: any) {
+      throw new HttpException(
+        { message: err.message || 'Failed to update profile' },
+        HttpStatus.BAD_REQUEST
       );
     }
   }
