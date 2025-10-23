@@ -11,6 +11,7 @@ const common_1 = require("@nestjs/common");
 const health_controller_1 = require("../routes/health.controller");
 const redis_module_1 = require("../redis/redis.module");
 const db_module_1 = require("../db/db.module");
+const auth_module_1 = require("../auth/auth.module");
 const authz_module_1 = require("../authz/authz.module");
 const storage_module_1 = require("../storage/storage.module");
 const inbox_module_1 = require("../inbox/inbox.module");
@@ -19,7 +20,7 @@ let AppModule = class AppModule {
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
-        imports: [redis_module_1.RedisModule, db_module_1.DbModule, authz_module_1.AuthzModule, storage_module_1.StorageModule, inbox_module_1.InboxModule],
+        imports: [redis_module_1.RedisModule, db_module_1.DbModule, auth_module_1.AuthModule, authz_module_1.AuthzModule, storage_module_1.StorageModule, inbox_module_1.InboxModule],
         controllers: [health_controller_1.HealthController],
     })
 ], AppModule);
