@@ -124,7 +124,7 @@ services:
     name: fastprep-admin-frontend
     runtime: static
     rootDir: ./frontend
-    buildCommand: npm run build
+    buildCommand: npm install && npm run build
     staticPublishPath: ./build
     routes:
       - type: rewrite
@@ -132,7 +132,7 @@ services:
         destination: /index.html
     envVars:
       - key: REACT_APP_API_URL
-        value: https://fastprep-admin-api.onrender.com/api
+        value: https://fastprep-admin-api.onrender.com
  # Redis Service
   - type: redis
     name: fastprep-redis
