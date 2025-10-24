@@ -42,8 +42,7 @@
     "@whiskeysockets/baileys": "^6.7.7",
     "qrcode": "^1.5.3",
     "@types/qrcode": "^1.5.5",
-    "telegram": "^2.19.8",
-    "tdl": "^7.3.2"
+    "telegram": "^2.19.8"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

@@ -1,11 +1,14 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { Client } from 'tdl';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
 import axios from 'axios';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
-  private client: Client | null = null;
+  private client: TelegramClient | null = null;
   private isReady = false;
 
   async onModuleInit() {
@@ -14,8 +17,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     if (this.client) {
-      await this.client.close();
-      this.logger.log('🔌 Telegram client closed');
+      await this.client.disconnect();
+      this.logger.log('🔌 Telegram client disconnected');
     }
   }
 
@@ -23,149 +26,108 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const apiId = parseInt(process.env.TG_API_ID || '0', 10);
     const apiHash = process.env.TG_API_HASH || '';
     const tdlibDir = process.env.TDLIB_DIR || '/var/data/tdlib';
-    const encryptionKey = process.env.TDLIB_ENCRYPTION_KEY || '';
+    const sessionFile = path.join(tdlibDir, 'session.txt');
 
     if (!apiId || !apiHash) {
       this.logger.warn('⚠️ TG_API_ID or TG_API_HASH not set. Telegram integration disabled.');
       return;
     }
 
-    if (!encryptionKey) {
-      this.logger.warn('⚠️ TDLIB_ENCRYPTION_KEY not set. Telegram integration disabled.');
-      return;
-    }
-
     try {
       this.logger.log('🔐 Initializing Telegram client...');
-      this.logger.log(`📁 Session directory: ${tdlibDir}`);
+      this.logger.log(`📁 Session file: ${sessionFile}`);
 
-      this.client = new Client({
-        apiId,
-        apiHash,
-        databaseDirectory: `${tdlibDir}/db`,
-        filesDirectory: `${tdlibDir}/files`,
-        databaseEncryptionKey: encryptionKey,
-        useTestDc: false,
-      });
+      // Ensure directory exists
+      if (!fs.existsSync(tdlibDir)) {
+        fs.mkdirSync(tdlibDir, { recursive: true });
+      }
 
-      this.client.on('error', (err) => {
-        this.logger.error('❌ TDLib Error:', err);
-      });
+      // Load session if exists
+      let sessionString = '';
+      if (fs.existsSync(sessionFile)) {
+        sessionString = fs.readFileSync(sessionFile, 'utf8');
+        this.logger.log('📂 Loaded existing session');
+      }
 
-      this.client.on('update', async (update) => {
-        await this.handleUpdate(update);
+      const stringSession = new StringSession(sessionString);
+
+      this.client = new TelegramClient(stringSession, apiId, apiHash, {
+        connectionRetries: 5,
       });
 
       await this.client.connect();
 
-      // Wait for authorization
-      const authState = await this.client.invoke({ _: 'getAuthorizationState' });
+      // Check if authorized
+      const authorized = await this.client.isUserAuthorized();
       
-      if (authState._ === 'authorizationStateReady') {
+      if (authorized) {
         this.isReady = true;
-        const me = await this.client.invoke({ _: 'getMe' });
-        this.logger.log(`✅ Telegram connected as: ${me.first_name} ${me.last_name || ''} (@${me.username || 'N/A'})`);
+        const me = await this.client.getMe();
+        this.logger.log(`✅ Telegram connected as: ${me.firstName} ${me.lastName || ''} (@${me.username || 'N/A'})`);
+
+        // Save session
+        const session = this.client.session.save() as unknown as string;
+        fs.writeFileSync(sessionFile, session, 'utf8');
       } else {
-        this.logger.warn(`⚠️ Telegram not authenticated. Current state: ${authState._}`);
+        this.logger.warn(`⚠️ Telegram not authenticated.`);
         this.logger.warn('Run: npm run start:tg-login in Render Shell to authenticate');
       }
+
+      // Listen for new messages
+      this.client.addEventHandler(this.handleNewMessage.bind(this), {});
+
     } catch (error) {
       this.logger.error('❌ Failed to initialize Telegram client:', error);
     }
   }
 
-  private async handleUpdate(update: any) {
+  private async handleNewMessage(event: any) {
     try {
-      // Handle new messages
-      if (update._ === 'updateNewMessage') {
-        const message = update.message;
-        
-        // Skip outgoing messages
-        if (message.is_outgoing) {
-          return;
-        }
-
-        await this.processIncomingMessage(message);
+      if (!event.message) {
+        return;
       }
 
-      // Handle message send success
-      if (update._ === 'updateMessageSendSucceeded') {
-        this.logger.debug(`✅ Message sent successfully: ${update.message.id}`);
-        await this.notifyMessageStatus(update.message.id, 'sent', update.message);
+      const message = event.message;
+
+      // Skip outgoing messages
+      if (message.out) {
+        return;
       }
 
-      // Handle message send failure
-      if (update._ === 'updateMessageSendFailed') {
-        this.logger.error(`❌ Message send failed: ${update.message.id}`, update.error);
-        await this.notifyMessageStatus(update.message.id, 'failed', null, update.error);
-      }
-
-      // Handle authorization state changes
-      if (update._ === 'updateAuthorizationState') {
-        this.logger.log(`📱 Auth state changed: ${update.authorization_state._}`);
-        if (update.authorization_state._ === 'authorizationStateReady') {
-          this.isReady = true;
-        } else if (update.authorization_state._ === 'authorizationStateClosed') {
-          this.isReady = false;
-        }
-      }
+      await this.processIncomingMessage(message);
     } catch (error) {
-      this.logger.error('Error handling update:', error);
+      this.logger.error('Error handling new message:', error);
     }
   }
 
   private async processIncomingMessage(message: any) {
     try {
-      const chatId = message.chat_id;
+      const chatId = message.chatId || message.peerId?.userId;
       const messageId = message.id;
-      const senderId = message.sender_id?.user_id;
+      const senderId = message.senderId?.userId;
       
-      let text = '';
-      let attachments: any[] = [];
-
-      // Extract text
-      if (message.content?._ === 'messageText') {
-        text = message.content.text?.text || '';
-      } else if (message.content?._ === 'messagePhoto') {
-        text = message.content.caption?.text || '[Photo]';
-        attachments.push({
-          type: 'photo',
-          file_id: message.content.photo?.sizes?.[0]?.photo?.id,
-        });
-      } else if (message.content?._ === 'messageDocument') {
-        text = message.content.caption?.text || '[Document]';
-        attachments.push({
-          type: 'document',
-          file_id: message.content.document?.document?.id,
-          file_name: message.content.document?.file_name,
-        });
-      } else if (message.content?._ === 'messageVoiceNote') {
-        text = '[Voice Message]';
-        attachments.push({
-          type: 'voice',
-          file_id: message.content.voice_note?.voice?.id,
-        });
-      } else {
-        text = `[${message.content?._}]`;
-      }
+      const text = message.text || '[Media]';
+      const attachments: any[] = [];
 
       // Get chat info
-      const chat = await this.client!.invoke({
-        _: 'getChat',
-        chat_id: chatId,
-      });
-
-      // Get sender info if available
+      let chatTitle = 'Unknown';
       let senderName = 'Unknown';
-      if (senderId) {
+
+      if (this.client) {
         try {
-          const user = await this.client!.invoke({
-            _: 'getUser',
-            user_id: senderId,
-          });
-          senderName = `${user.first_name} ${user.last_name || ''}`.trim();
+          const entity = await this.client.getEntity(chatId);
+          chatTitle = (entity as any).title || (entity as any).firstName || 'Unknown';
         } catch (error) {
-          this.logger.warn(`Could not fetch user info for ${senderId}`);
+          this.logger.warn(`Could not fetch chat info for ${chatId}`);
+        }
+
+        if (senderId) {
+          try {
+            const sender = await this.client.getEntity(senderId);
+            senderName = `${(sender as any).firstName} ${(sender as any).lastName || ''}`.trim();
+          } catch (error) {
+            this.logger.warn(`Could not fetch sender info for ${senderId}`);
+          }
         }
       }
 
@@ -175,14 +137,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         messageId: String(messageId),
         senderId: senderId ? String(senderId) : null,
         senderName,
-        chatTitle: chat.title || senderName,
+        chatTitle,
         text,
         attachments,
-        timestamp: message.date * 1000, // Convert to milliseconds
+        timestamp: message.date * 1000,
         raw: message,
       };
 
-      this.logger.log(`📨 Incoming Telegram message from ${senderName} in ${chat.title || 'private chat'}`);
+      this.logger.log(`📨 Incoming Telegram message from ${senderName} in ${chatTitle}`);
 
       // Send to backend API
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
@@ -206,40 +168,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async notifyMessageStatus(
-    messageId: number,
-    status: 'sent' | 'failed',
-    message?: any,
-    error?: any
-  ) {
-    try {
-      const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
-      const serviceJwt = process.env.SERVICE_JWT;
-
-      if (!serviceJwt) {
-        return;
-      }
-
-      await axios.post(
-        `${backendUrl}/api/inbox/events/telegram/status`,
-        {
-          messageId: String(messageId),
-          status,
-          message,
-          error,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${serviceJwt}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-    } catch (error) {
-      this.logger.error('Error notifying message status:', error);
-    }
-  }
-
   async sendMessage(chatId: string | number, text: string): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');
@@ -248,16 +176,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       this.logger.log(`📤 Sending message to chat ${chatId}`);
 
-      const result = await this.client.invoke({
-        _: 'sendMessage',
-        chat_id: Number(chatId),
-        input_message_content: {
-          _: 'inputMessageText',
-          text: {
-            _: 'formattedText',
-            text,
-          },
-        },
+      const result = await this.client.sendMessage(Number(chatId), {
+        message: text,
       });
 
       this.logger.log(`✅ Message sent: ${result.id}`);
@@ -274,13 +194,59 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const me = await this.client.invoke({ _: 'getMe' });
+      const me = await this.client.getMe();
       return {
         connected: true,
-        username: me.username || undefined,
+        username: (me as any).username || undefined,
       };
     } catch (error) {
       return { connected: false };
+    }
+  }
+
+  // Stub methods for compatibility with MessengersService
+  async initConnection(userId: string, data?: Record<string, unknown>): Promise<any> {
+    this.logger.warn('⚠️ initConnection called for Telegram - use telegram-login script instead');
+    return {
+      message: 'Telegram requires manual authentication via telegram-login script',
+      instructions: 'Run: npm run start:tg-login in Render Shell',
+    };
+  }
+
+  async getQrCode(userId: string): Promise<any> {
+    this.logger.warn('⚠️ getQrCode called for Telegram - not supported');
+    throw new Error('Telegram does not support QR code authentication');
+  }
+
+  async verifyConnection(userId: string): Promise<boolean> {
+    return this.isReady;
+  }
+
+  async getAccountInfo(userId: string): Promise<any> {
+    if (!this.client || !this.isReady) {
+      return null;
+    }
+
+    try {
+      const me = await this.client.getMe();
+      return {
+        id: (me as any).id,
+        firstName: (me as any).firstName,
+        lastName: (me as any).lastName || '',
+        username: (me as any).username || '',
+        phoneNumber: (me as any).phone || '',
+      };
+    } catch (error) {
+      this.logger.error('Failed to get account info:', error);
+      return null;
+    }
+  }
+
+  async disconnect(userId: string): Promise<void> {
+    this.logger.log('🔌 Disconnect requested - closing Telegram client');
+    if (this.client) {
+      await this.client.disconnect();
+      this.isReady = false;
     }
   }
 }
