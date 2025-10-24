@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
 import { MetricsService } from './metrics.service';
 import { AlertsService } from './alerts.service';
+import { TelegramService } from '../messengers/telegram/telegram.service';
 
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
 const BASE_BACKOFF_MS = Number(process.env.OUTBOX_BASE_BACKOFF_MS || 1000);
@@ -24,7 +25,8 @@ export class WorkerService implements OnModuleDestroy {
   constructor(
     @Inject(PG_POOL) private pool: Pool,
     private metrics: MetricsService,
-    private alerts: AlertsService
+    private alerts: AlertsService,
+    private telegramService: TelegramService
   ) {}
 
   async start() {
@@ -116,9 +118,25 @@ export class WorkerService implements OnModuleDestroy {
 
       const msg = msgRes.rows[0];
 
-      // Вызов TG-Adapter
+      // Определяем платформу из channel_id
+      const convRes = await client.query(
+        `SELECT channel_id FROM conversations WHERE id = $1`,
+        [msg.conversation_id]
+      );
+      const channelId = convRes.rows[0]?.channel_id || '';
+      const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
+
+      // Вызов соответствующего сервиса
       const start = Date.now();
-      const result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
+      let result: { success: boolean; externalMessageId?: string; error?: string };
+
+      if (platform === 'telegram') {
+        result = await this.sendViaTelegram(channelId, msg.text);
+      } else {
+        // Fallback to TG-Adapter for legacy
+        result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
+      }
+
       const duration = (Date.now() - start) / 1000;
       this.metrics.adapterLatencySeconds.observe(duration);
 
@@ -158,6 +176,33 @@ export class WorkerService implements OnModuleDestroy {
       }
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Send via Telegram TDLib
+   */
+  private async sendViaTelegram(
+    channelId: string,
+    text: string
+  ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
+    try {
+      // Extract chat ID from channel_id format: "telegram:12345"
+      const chatId = channelId.split(':')[1];
+      if (!chatId) {
+        return { success: false, error: 'Invalid channel_id format' };
+      }
+
+      const result = await this.telegramService.sendMessage(chatId, text);
+      return {
+        success: true,
+        externalMessageId: String(result.id),
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Telegram send failed',
+      };
     }
   }
 

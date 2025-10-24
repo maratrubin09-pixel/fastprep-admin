@@ -120,6 +120,97 @@ export class InboxService {
       client.release();
     }
   }
+
+  /**
+   * Find or create conversation thread by channel_id
+   */
+  async findOrCreateThread(params: {
+    channel_id: string;
+    external_chat_id?: string;
+    platform?: string;
+  }): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      // Try to find existing thread
+      const existingThread = await client.query(
+        `SELECT * FROM conversations WHERE channel_id = $1`,
+        [params.channel_id]
+      );
+
+      if (existingThread.rows.length > 0) {
+        return existingThread.rows[0];
+      }
+
+      // Create new thread
+      const result = await client.query(
+        `INSERT INTO conversations (channel_id, external_chat_id, status, created_at, updated_at)
+         VALUES ($1, $2, 'open', NOW(), NOW())
+         RETURNING *`,
+        [params.channel_id, params.external_chat_id || null]
+      );
+
+      const thread = result.rows[0];
+
+      // Add to unassigned set in Redis
+      await this.redis.sadd('inbox:unassigned', thread.id);
+
+      return thread;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Create incoming message
+   */
+  async createMessage(params: {
+    conversation_id: string;
+    direction: 'in' | 'out';
+    text: string;
+    external_message_id?: string;
+    sender_name?: string;
+    metadata?: any;
+  }): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        `INSERT INTO messages (conversation_id, direction, text, external_message_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, NOW(), NOW())
+         RETURNING *`,
+        [params.conversation_id, params.direction, params.text, params.external_message_id || null]
+      );
+
+      const message = result.rows[0];
+
+      // Update thread's last_message_at
+      await client.query(
+        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [params.conversation_id]
+      );
+
+      await client.query('COMMIT');
+
+      return message;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Update message delivery status
+   */
+  async updateMessageStatus(externalMessageId: string, status: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE messages SET delivery_status = $1, updated_at = NOW() 
+       WHERE external_message_id = $2`,
+      [status, externalMessageId]
+    );
+  }
 }
 
 

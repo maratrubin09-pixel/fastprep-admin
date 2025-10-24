@@ -46,6 +46,12 @@ services:
         sync: false
       - key: S3_SECRET_ACCESS_KEY
         sync: false
+      - key: TG_API_ID
+        sync: false
+      - key: TG_API_HASH
+        sync: false
+      - key: SERVICE_JWT
+        sync: false
       - key: TG_ADAPTER_URL
         value: https://fastprep-tg-adapter.onrender.com
       - key: TG_ADAPTER_TOKEN
@@ -61,6 +67,10 @@ services:
     rootDir: ./
     buildCommand: npm install && npm run build
     startCommand: npm run start:worker
+    disk:
+      name: tdlib-data
+      mountPath: /var/data/tdlib
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -73,6 +83,20 @@ services:
           type: redis
           name: fastprep-redis
           property: connectionString
+      - key: TG_API_ID
+        sync: false
+      - key: TG_API_HASH
+        sync: false
+      - key: TDLIB_DIR
+        value: /var/data/tdlib
+      - key: TDLIB_ENCRYPTION_KEY
+        sync: false
+      - key: TG_PHONE_NUMBER
+        sync: false
+      - key: SERVICE_JWT
+        sync: false
+      - key: BACKEND_URL
+        value: https://fastprep-admin-api.onrender.com
       - key: TG_ADAPTER_URL
         value: https://fastprep-tg-adapter.onrender.com
       - key: TG_ADAPTER_TOKEN
