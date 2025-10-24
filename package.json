@@ -44,7 +44,7 @@
     "@types/qrcode": "^1.5.5",
     "telegram": "^2.19.8",
     "tdl": "^7.3.2",
-    "tdl-tdlib-addon": "^2.0.0"
+    "prebuilt-tdlib": "^0.1080.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

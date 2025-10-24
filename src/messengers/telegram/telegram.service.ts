@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Client } from 'tdl';
-import { TDLib } from 'tdl-tdlib-addon';
+import { getTdjson } from 'prebuilt-tdlib';
 import axios from 'axios';
 
 @Injectable()
@@ -40,7 +40,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('🔐 Initializing Telegram client...');
       this.logger.log(`📁 Session directory: ${tdlibDir}`);
 
-      this.client = new Client(new TDLib(), {
+      this.client = new Client(getTdjson(), {
         apiId,
         apiHash,
         databaseDirectory: `${tdlibDir}/db`,
