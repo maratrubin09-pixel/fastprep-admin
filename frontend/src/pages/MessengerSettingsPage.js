@@ -215,7 +215,9 @@ const MessengerSettingsPage = () => {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/messengers/${messengerId}/connect`, {
+      
+      // Step 1: Initiate connection
+      const connectResponse = await fetch(`${API_URL}/api/messengers/${messengerId}/connect`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -223,22 +225,65 @@ const MessengerSettingsPage = () => {
         },
       });
 
-      if (!response.ok) {
+      if (!connectResponse.ok) {
         throw new Error('Failed to initiate connection');
       }
 
-      const data = await response.json();
-      setQrCode(data.qrCode || '');
+      const connectData = await connectResponse.json();
+      console.log('Connection initiated:', connectData);
+      
+      // Open dialog immediately
       setQrDialog(true);
       
-      // Start verification polling
+      // Step 2: Start polling for QR code
+      startQrPolling(messengerId, token);
+      
+      // Step 3: Start verification polling
       startVerificationPolling(messengerId);
     } catch (err) {
       setError(err.message || 'Failed to connect');
       console.error('Connection error:', err);
-    } finally {
       setLoading(false);
     }
+  };
+
+  const startQrPolling = async (messengerId, token) => {
+    let attempts = 0;
+    const maxAttempts = 20; // 20 attempts * 1 second = 20 seconds max wait
+    
+    const pollQr = async () => {
+      attempts++;
+      
+      try {
+        const qrResponse = await fetch(`${API_URL}/api/messengers/${messengerId}/qr`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (qrResponse.ok) {
+          const qrData = await qrResponse.json();
+          if (qrData.qrCode) {
+            console.log('QR code received');
+            setQrCode(qrData.qrCode);
+            setLoading(false);
+            return; // Stop polling, we got the QR code
+          }
+        }
+      } catch (err) {
+        console.error('QR polling error:', err);
+      }
+
+      // Continue polling if we haven't reached max attempts
+      if (attempts < maxAttempts) {
+        setTimeout(pollQr, 1000); // Poll every 1 second
+      } else {
+        setError('Timeout waiting for QR code');
+        setLoading(false);
+      }
+    };
+
+    pollQr();
   };
 
   const startVerificationPolling = (messengerId) => {

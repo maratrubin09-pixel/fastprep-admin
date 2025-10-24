@@ -43,7 +43,7 @@ export class MessengersService {
   async getStatus(token: string) {
     // For testing: return mock status without checking token
     const platforms = ['whatsapp', 'telegram', 'instagram', 'facebook'];
-    const status = {};
+    const status: Record<string, any> = {};
     
     platforms.forEach(platform => {
       status[platform] = {

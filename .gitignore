@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-# dist/  (temporarily allowing dist/ for pre-built deploy)
+dist/
 build/
 
 # Environment variables
@@ -11,7 +11,7 @@ build/
 .env.development
 .env.test
 .env.production
-.env.*
+!.env.example
 
 # Logs
 *.log

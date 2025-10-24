@@ -32,3 +32,4 @@ ON CONFLICT (email) DO NOTHING;
 -- Verify
 SELECT id, email, name, role_id FROM users WHERE email = 'admin@fastprepusa.com';
 
+

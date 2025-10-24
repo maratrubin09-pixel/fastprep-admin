@@ -166,3 +166,4 @@ curl https://fastprep-admin-api.onrender.com/api
 **Время деплоя:** ~10-15 минут (с credentials)
 **Стоимость:** ~$21/мес (Postgres+Redis+API+Worker, без TG Adapter)
 
+
