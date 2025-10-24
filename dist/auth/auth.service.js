@@ -73,6 +73,52 @@ let AuthService = class AuthService {
             throw new Error('Invalid token');
         }
     }
+    async updateProfile(token, data) {
+        try {
+            const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+            const userId = decoded.userId;
+            // If changing password, verify current password
+            if (data.newPassword) {
+                if (!data.currentPassword) {
+                    throw new Error('Current password is required');
+                }
+                const userCheck = await this.pool.query(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+                if (userCheck.rows.length === 0) {
+                    throw new Error('User not found');
+                }
+                // MVP: Simple password check (NOT FOR PRODUCTION!)
+                if (userCheck.rows[0].password_hash !== data.currentPassword) {
+                    throw new Error('Current password is incorrect');
+                }
+            }
+            // Build update query
+            const fields = [];
+            const values = [];
+            let paramCount = 1;
+            if (data.name) {
+                fields.push(`full_name = $${paramCount++}`);
+                values.push(data.name);
+            }
+            if (data.email) {
+                fields.push(`email = $${paramCount++}`);
+                values.push(data.email);
+            }
+            if (data.newPassword) {
+                fields.push(`password_hash = $${paramCount++}`);
+                values.push(data.newPassword);
+            }
+            fields.push(`updated_at = NOW()`);
+            values.push(userId);
+            const result = await this.pool.query(`UPDATE users
+         SET ${fields.join(', ')}
+         WHERE id = $${paramCount}
+         RETURNING id, email, full_name as name`, values);
+            return result.rows[0];
+        }
+        catch (err) {
+            throw new Error(err.message || 'Failed to update profile');
+        }
+    }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([

@@ -25,15 +25,23 @@ export class MessengersController {
     @Param('platform') platform: string,
     @Body() body: any
   ) {
+    console.log(`📞 Connect request for platform: ${platform}`);
+    console.log(`🔑 Auth header present: ${!!authHeader}`);
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('❌ Unauthorized: Missing or invalid auth header');
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
     const token = authHeader.substring(7);
+    console.log(`✅ Token extracted, length: ${token.length}`);
+    
     try {
       const result = await this.messengersService.connect(token, platform, body);
+      console.log(`✅ Connection successful for ${platform}`);
       return { success: true, result };
     } catch (err: any) {
+      console.error(`❌ Connection failed for ${platform}:`, err.message);
       throw new HttpException(
         { message: err.message || 'Failed to connect' },
         HttpStatus.BAD_REQUEST

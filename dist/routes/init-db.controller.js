@@ -52,6 +52,21 @@ let InitDbController = class InitDbController {
         )
       `);
             await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
+            // Create messenger_connections table
+            await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS messenger_connections (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          platform VARCHAR(50) NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'disconnected',
+          connection_data JSONB DEFAULT '{}'::jsonb,
+          connected_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(user_id, platform)
+        )
+      `);
+            await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_messenger_connections_user_id ON messenger_connections(user_id)`);
             // Create role
             await this.pool.query(`
         INSERT INTO roles (name, permissions)
@@ -68,7 +83,7 @@ let InitDbController = class InitDbController {
         VALUES ($1, $2, $3)
         ON CONFLICT (email) DO NOTHING
         RETURNING id
-      `, ['admin@fastprepusa.com', 'test123', 'Admin User']);
+      `, ['marat@fastprepusa.com', 'test123', 'Marat Rubin']);
             // Assign role
             if (userResult.rows.length > 0) {
                 const userId = userResult.rows[0].id;
@@ -86,7 +101,7 @@ let InitDbController = class InitDbController {
                 success: true,
                 message: 'Database initialized successfully',
                 credentials: {
-                    email: 'admin@fastprepusa.com',
+                    email: 'marat@fastprepusa.com',
                     password: 'test123',
                 },
             };

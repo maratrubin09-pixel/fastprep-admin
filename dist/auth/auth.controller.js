@@ -42,6 +42,19 @@ let AuthController = class AuthController {
             throw new common_1.HttpException({ message: err.message || 'Invalid token' }, common_1.HttpStatus.UNAUTHORIZED);
         }
     }
+    async updateProfile(authHeader, body) {
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            throw new common_1.HttpException('Unauthorized', common_1.HttpStatus.UNAUTHORIZED);
+        }
+        const token = authHeader.substring(7);
+        try {
+            const user = await this.authService.updateProfile(token, body);
+            return user;
+        }
+        catch (err) {
+            throw new common_1.HttpException({ message: err.message || 'Failed to update profile' }, common_1.HttpStatus.BAD_REQUEST);
+        }
+    }
 };
 exports.AuthController = AuthController;
 __decorate([
@@ -58,6 +71,14 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "getMe", null);
+__decorate([
+    (0, common_1.Put)('profile'),
+    __param(0, (0, common_1.Headers)('authorization')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "updateProfile", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])

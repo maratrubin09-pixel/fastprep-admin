@@ -127,11 +127,23 @@ export class WhatsAppService implements OnModuleInit {
       
       console.log(`Baileys version: ${version.join('.')}`);
 
+      // Create a proper logger that Baileys expects
+      const logger = {
+        level: 'error',
+        fatal: (...args: any[]) => console.error('[Baileys FATAL]', ...args),
+        error: (...args: any[]) => console.error('[Baileys ERROR]', ...args),
+        warn: () => {},
+        info: () => {},
+        debug: () => {},
+        trace: () => {},
+        child: () => logger, // Return self for child loggers
+      };
+
       const sock = makeWASocket({
         version,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, console as any),
+          keys: makeCacheableSignalKeyStore(state.keys, logger as any),
         },
         printQRInTerminal: false,
         generateHighQualityLinkPreview: true,
@@ -140,16 +152,7 @@ export class WhatsAppService implements OnModuleInit {
         markOnlineOnConnect: false,
         connectTimeoutMs: 20000,
         keepAliveIntervalMs: 15000,
-        // Disable verbose logging to reduce noise
-        logger: {
-          level: 'error',
-          fatal: console.error,
-          error: console.error,
-          warn: () => {},
-          info: () => {},
-          debug: () => {},
-          trace: () => {},
-        } as any,
+        logger: logger as any,
       });
 
       const session: WhatsAppSession = {

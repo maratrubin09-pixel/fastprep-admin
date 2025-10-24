@@ -73,7 +73,7 @@ let WsGateway = class WsGateway {
         const sockets = await this.server.fetchSockets();
         for (const socket of sockets) {
             const data = socket.data;
-            if (data?.userId === userId) {
+            if (data && data.userId === userId) {
                 const ep = await this.authz.getEffectivePermissions(userId);
                 if (ep) {
                     data.ep = ep;
