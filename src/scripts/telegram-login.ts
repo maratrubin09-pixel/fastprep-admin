@@ -1,5 +1,4 @@
 import { Client } from 'tdl';
-import { getTdjson } from 'prebuilt-tdlib';
 import * as readline from 'readline';
 
 const rl = readline.createInterface({
@@ -33,7 +32,7 @@ async function login() {
   console.log('🔐 Initializing Telegram client...');
   console.log(`📁 Session directory: ${tdlibDir}`);
 
-  const client = new Client(getTdjson(), {
+  const client = new Client({
     apiId,
     apiHash,
     databaseDirectory: `${tdlibDir}/db`,
