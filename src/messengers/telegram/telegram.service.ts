@@ -172,7 +172,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      await axios.post(`${backendUrl}/api/inbox/events/telegram`, payload, {
+      const url = `${backendUrl}/api/inbox/events/telegram`;
+      this.logger.debug(`📡 Sending to: ${url}`);
+      this.logger.debug(`🔑 Service JWT (first 10 chars): ${serviceJwt.substring(0, 10)}...`);
+
+      await axios.post(url, payload, {
         headers: {
           Authorization: `Bearer ${serviceJwt}`,
           'Content-Type': 'application/json',
@@ -180,8 +184,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
 
       this.logger.debug(`✅ Message forwarded to backend API`);
-    } catch (error) {
-      this.logger.error('Error processing incoming message:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Error processing incoming message:', error.message);
+      if (error.response) {
+        this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(`Response data:`, error.response.data);
+      }
     }
   }
 
