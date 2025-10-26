@@ -9,6 +9,28 @@ import * as path from 'path';
 export class InitDbController {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
+  @Public() // Миграция для добавления колонок в outbox
+  @Post('migrate')
+  async migrateDatabase() {
+    try {
+      await this.pool.query(`
+        ALTER TABLE outbox ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+      `);
+      await this.pool.query(`
+        ALTER TABLE outbox ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
+      `);
+      return { 
+        success: true, 
+        message: 'Migration completed: added scheduled_at and attempts columns to outbox table' 
+      };
+    } catch (error: any) {
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
   @Public() // Публичный endpoint для инициализации БД
   @Post()
   async initializeDatabase() {
