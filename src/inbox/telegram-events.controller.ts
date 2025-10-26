@@ -8,8 +8,10 @@ import {
   ExecutionContext,
   UnauthorizedException,
   Logger,
+  Get,
 } from '@nestjs/common';
 import { InboxService } from './inbox.service';
+import { Public } from '../auth/public.decorator';
 
 // Guard to verify SERVICE_JWT
 @Injectable()
@@ -63,6 +65,7 @@ export class TelegramEventsController {
 
   constructor(private readonly inboxService: InboxService) {}
 
+  @Public() // Bypass global JwtAuthGuard - this is for service-to-service auth
   @Post('telegram')
   @UseGuards(ServiceJwtGuard)
   async handleTelegramEvent(@Body() event: TelegramEventDto) {
@@ -113,6 +116,7 @@ export class TelegramEventsController {
     }
   }
 
+  @Public() // Bypass global JwtAuthGuard
   @Post('telegram/status')
   @UseGuards(ServiceJwtGuard)
   async handleTelegramStatus(@Body() status: { messageId: string; status: string; error?: any }) {
@@ -127,6 +131,20 @@ export class TelegramEventsController {
       this.logger.error('Error updating message status:', error);
       throw error;
     }
+  }
+
+  // Diagnostic endpoint to verify ENV variables
+  @Public()
+  @Get('debug/env')
+  debugEnv() {
+    const serviceJwt = process.env.SERVICE_JWT;
+    this.logger.log('DEBUG: Checking ENV variables');
+    return {
+      SERVICE_JWT_EXISTS: !!serviceJwt,
+      SERVICE_JWT_LENGTH: serviceJwt?.length || 0,
+      SERVICE_JWT_FIRST_10: serviceJwt?.substring(0, 10) || null,
+      NODE_ENV: process.env.NODE_ENV,
+    };
   }
 }
 
