@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import { NewMessage } from 'telegram/events';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -74,7 +75,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Listen for new messages
-      this.client.addEventHandler(this.handleNewMessage.bind(this), {});
+      this.client.addEventHandler(this.handleNewMessage.bind(this), new NewMessage({}));
 
     } catch (error) {
       this.logger.error('❌ Failed to initialize Telegram client:', error);

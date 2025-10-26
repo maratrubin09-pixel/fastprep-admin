@@ -3,7 +3,6 @@ import { StringSession } from 'telegram/sessions';
 import * as readline from 'readline';
 import * as path from 'path';
 import * as fs from 'fs';
-import { input } from 'telegram/client/prompts';
 
 const rl = readline.createInterface({
   input: process.stdin,
