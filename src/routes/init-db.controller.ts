@@ -105,6 +105,8 @@ export class InitDbController {
           conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
           message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
           status VARCHAR(20) NOT NULL DEFAULT 'pending',
+          scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          attempts INT NOT NULL DEFAULT 0,
           retry_count INT NOT NULL DEFAULT 0,
           last_error TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
