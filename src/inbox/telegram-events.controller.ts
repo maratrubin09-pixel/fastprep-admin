@@ -70,6 +70,7 @@ export class TelegramEventsController {
   @UseGuards(ServiceJwtGuard)
   async handleTelegramEvent(@Body() event: TelegramEventDto) {
     this.logger.log(`📨 Received Telegram event from chat ${event.chatId}`);
+    this.logger.warn(`🔍 Event text field: "${event.text}" (type: ${typeof event.text})`);
 
     try {
       // Find or create conversation thread
