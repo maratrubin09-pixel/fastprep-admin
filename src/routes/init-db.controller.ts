@@ -1,6 +1,7 @@
 import { Controller, Post, Inject } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
+import { Public } from '../auth/public.decorator';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -8,6 +9,7 @@ import * as path from 'path';
 export class InitDbController {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
+  @Public() // Публичный endpoint для инициализации БД
   @Post()
   async initializeDatabase() {
     try {

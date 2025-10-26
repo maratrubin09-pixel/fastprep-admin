@@ -6,6 +6,24 @@ import { PG_POOL } from '../db/db.module';
 export class UsersService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
+  async findById(userId: string) {
+    const result = await this.pool.query(`
+      SELECT id, email, full_name, password_hash, created_at
+      FROM users
+      WHERE id = $1
+    `, [userId]);
+    return result.rows[0] || null;
+  }
+
+  async findByEmail(email: string) {
+    const result = await this.pool.query(`
+      SELECT id, email, full_name, password_hash, created_at
+      FROM users
+      WHERE email = $1
+    `, [email]);
+    return result.rows[0] || null;
+  }
+
   async getAllUsers() {
     const result = await this.pool.query(`
       SELECT u.id, u.email, u.full_name as name, u.created_at, r.name as role

@@ -1,10 +1,13 @@
-import { Controller, Post, Get, Put, Body, Headers, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Put, Body, Req, HttpException, HttpStatus, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt.guard';
+import { Public } from './public.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public() // Этот endpoint доступен без JWT
   @Post('login')
   async login(@Body() body: { email: string; password: string }) {
     try {
@@ -18,36 +21,30 @@ export class AuthController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('me')
-  async getMe(@Headers('authorization') authHeader: string) {
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
-    }
-
-    const token = authHeader.substring(7);
+  async getMe(@Req() req: any) {
+    // req.user установлен JwtStrategy
     try {
-      const user = await this.authService.getMe(token);
+      const user = await this.authService.getMe(req.user.id);
       return user;
     } catch (err: any) {
       throw new HttpException(
-        { message: err.message || 'Invalid token' },
+        { message: err.message || 'User not found' },
         HttpStatus.UNAUTHORIZED
       );
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Put('profile')
   async updateProfile(
-    @Headers('authorization') authHeader: string,
+    @Req() req: any,
     @Body() body: { name?: string; email?: string; currentPassword?: string; newPassword?: string }
   ) {
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
-    }
-
-    const token = authHeader.substring(7);
+    // req.user установлен JwtStrategy
     try {
-      const user = await this.authService.updateProfile(token, body);
+      const user = await this.authService.updateProfile(req.user.id, body);
       return user;
     } catch (err: any) {
       throw new HttpException(

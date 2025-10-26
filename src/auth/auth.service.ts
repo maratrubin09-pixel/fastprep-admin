@@ -1,13 +1,18 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private jwtService: JwtService
+  ) {}
 
   async login(email: string, password: string): Promise<any> {
-    // Простая проверка: найти пользователя по email
+    // Найти пользователя по email
     const result = await this.pool.query(
       `SELECT u.id, u.email, u.full_name, u.password_hash, r.name as role_name, r.permissions
        FROM users u
@@ -18,18 +23,29 @@ export class AuthService {
     );
 
     if (result.rows.length === 0) {
-      throw new Error('User not found');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     const user = result.rows[0];
 
-    // MVP: Простая проверка пароля (для теста, НЕ ДЛЯ PRODUCTION!)
-    if (user.password_hash !== password) {
-      throw new Error('Invalid password');
+    // Проверка пароля
+    // Для обратной совместимости: если пароль не хеширован (старые пользователи), проверяем напрямую
+    let isPasswordValid = false;
+    if (user.password_hash.startsWith('$2')) {
+      // Хешированный пароль (bcrypt)
+      isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    } else {
+      // Простой пароль (для теста)
+      isPasswordValid = user.password_hash === password;
     }
 
-    // Генерируем простой JWT (или просто возвращаем токен-заглушку)
-    const token = Buffer.from(JSON.stringify({ userId: user.id, email: user.email })).toString('base64');
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Генерируем JWT токен
+    const payload = { sub: user.id, email: user.email };
+    const token = this.jwtService.sign(payload);
 
     return {
       token,
@@ -43,42 +59,35 @@ export class AuthService {
     };
   }
 
-  async getMe(token: string): Promise<any> {
-    try {
-      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-      const result = await this.pool.query(
-        `SELECT u.id, u.email, u.full_name, r.name as role_name, r.permissions
-         FROM users u
-         LEFT JOIN user_roles ur ON u.id = ur.user_id
-         LEFT JOIN roles r ON ur.role_id = r.id
-         WHERE u.id = $1`,
-        [decoded.userId]
-      );
+  async getMe(userId: string): Promise<any> {
+    const result = await this.pool.query(
+      `SELECT u.id, u.email, u.full_name, r.name as role_name, r.permissions
+       FROM users u
+       LEFT JOIN user_roles ur ON u.id = ur.user_id
+       LEFT JOIN roles r ON ur.role_id = r.id
+       WHERE u.id = $1`,
+      [userId]
+    );
 
-      if (result.rows.length === 0) {
-        throw new Error('User not found');
-      }
-
-      const user = result.rows[0];
-      return {
-        id: user.id,
-        email: user.email,
-        name: user.full_name,
-        role: user.role_name,
-        permissions: user.permissions,
-      };
-    } catch (err) {
-      throw new Error('Invalid token');
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException('User not found');
     }
+
+    const user = result.rows[0];
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.full_name,
+      role: user.role_name,
+      permissions: user.permissions,
+    };
   }
 
   async updateProfile(
-    token: string,
+    userId: string,
     data: { name?: string; email?: string; currentPassword?: string; newPassword?: string }
   ): Promise<any> {
     try {
-      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-      const userId = decoded.userId;
 
       // If changing password, verify current password
       if (data.newPassword) {
