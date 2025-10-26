@@ -1,4 +1,4 @@
-import { Controller, Post, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
@@ -11,7 +11,7 @@ class SendMessageDto {
   objectKey?: string;
 }
 
-@Controller('inbox/threads')
+@Controller('inbox')
 export class MessagesController {
   constructor(
     private s3: S3Service,
@@ -19,11 +19,43 @@ export class MessagesController {
   ) {}
 
   /**
-   * POST /api/inbox/threads/:id/messages
+   * GET /api/inbox/conversations
+   * Get all conversations for the current user
+   */
+  @Get('conversations')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getConversations(@Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    return await this.inbox.getAllConversations();
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/messages
+   * Get all messages for a conversation
+   */
+  @Get('conversations/:id/messages')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getMessages(@Param('id') threadId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    return await this.inbox.getMessages(threadId);
+  }
+
+  /**
+   * POST /api/inbox/conversations/:id/messages
    * Валидация objectKey (HEAD: существует, допустимый MIME/размер, префикс inbox/{threadId}/)
    * Транзакция: messages (out, delivery_status='queued') → outbox (pending) → audit_logs
    */
-  @Post(':id/messages')
+  @Post('conversations/:id/messages')
   @UseGuards(PepGuard)
   @RequirePerm('inbox.send_message')
   async sendMessage(@Param('id') threadId: string, @Body() dto: SendMessageDto, @Req() req: any) {

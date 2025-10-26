@@ -8,6 +8,7 @@ import MyProfilePage from './pages/MyProfilePage';
 import UserManagementPage from './pages/UserManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import MessengerSettingsPage from './pages/MessengerSettingsPage';
+import InboxPage from './pages/InboxPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import PrivateRoute from './components/PrivateRoute';
 
@@ -46,7 +47,7 @@ function App() {
             path="/messages/inbox"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="Unified Inbox" description="All messages from all channels in one place" />
+                <InboxPage />
               </PrivateRoute>
             }
           />

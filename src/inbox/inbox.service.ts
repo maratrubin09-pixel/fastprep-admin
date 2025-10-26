@@ -211,6 +211,31 @@ export class InboxService {
       [status, externalMessageId]
     );
   }
+
+  /**
+   * Get all conversations ordered by last activity
+   */
+  async getAllConversations(): Promise<any[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM conversations 
+       ORDER BY COALESCE(last_message_at, created_at) DESC
+       LIMIT 100`
+    );
+    return result.rows;
+  }
+
+  /**
+   * Get all messages for a conversation
+   */
+  async getMessages(conversationId: string): Promise<any[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM messages 
+       WHERE conversation_id = $1 
+       ORDER BY created_at ASC`,
+      [conversationId]
+    );
+    return result.rows;
+  }
 }
 
 
