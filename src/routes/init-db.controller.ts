@@ -61,6 +61,58 @@ export class InitDbController {
 
       await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_messenger_connections_user_id ON messenger_connections(user_id)`);
 
+      // Create conversations table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS conversations (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          channel_id VARCHAR(255) UNIQUE NOT NULL,
+          external_chat_id VARCHAR(255),
+          status VARCHAR(20) NOT NULL DEFAULT 'open',
+          assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+          last_message_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_conversations_channel_id ON conversations(channel_id)`);
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)`);
+
+      // Create messages table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          direction VARCHAR(10) NOT NULL CHECK (direction IN ('in', 'out')),
+          text TEXT,
+          external_message_id VARCHAR(255),
+          sender_name VARCHAR(255),
+          delivery_status VARCHAR(20),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)`);
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_messages_external_message_id ON messages(external_message_id)`);
+
+      // Create outbox table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS outbox (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+          status VARCHAR(20) NOT NULL DEFAULT 'pending',
+          retry_count INT NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)`);
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_outbox_created_at ON outbox(created_at)`);
+
       // Create role
       await this.pool.query(`
         INSERT INTO roles (name, permissions)
