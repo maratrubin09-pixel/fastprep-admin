@@ -13,7 +13,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private isReady = false;
 
   async onModuleInit() {
-    await this.initializeClient();
+    // Only initialize persistent client in Worker (not API)
+    // API will create temporary clients for QR code generation
+    const isWorker = process.env.IS_WORKER === 'true';
+    if (isWorker) {
+      await this.initializeClient();
+    } else {
+      this.logger.log('⏭️ Skipping Telegram client initialization in API (Worker only)');
+    }
   }
 
   async onModuleDestroy() {
