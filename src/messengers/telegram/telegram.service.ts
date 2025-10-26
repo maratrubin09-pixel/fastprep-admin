@@ -114,7 +114,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const messageId = message.id;
       const senderId = message.senderId?.userId;
       
-      const text = message.text || '[Media]';
+      // Debug: log the message structure
+      this.logger.debug(`📋 Raw message structure: ${JSON.stringify({
+        text: message.text,
+        message: message.message,
+        type: typeof message.text,
+        keys: Object.keys(message)
+      })}`);
+      
+      const text = message.message || message.text || '[Media]';
       const attachments: any[] = [];
 
       // Get chat info
@@ -153,6 +161,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       };
 
       this.logger.log(`📨 Incoming Telegram message from ${senderName} in ${chatTitle}`);
+      this.logger.debug(`📤 Payload text field: "${text}" (type: ${typeof text})`);
 
       // Send to backend API
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
