@@ -28,9 +28,11 @@ class ServiceJwtGuard implements CanActivate {
     const token = authHeader.substring(7);
     const expectedToken = process.env.SERVICE_JWT;
 
-    this.logger.debug(`🔑 Received token (first 10): ${token.substring(0, 10)}...`);
-    this.logger.debug(`🔑 Expected token (first 10): ${expectedToken?.substring(0, 10)}...`);
-    this.logger.debug(`🔍 Tokens match: ${token === expectedToken}`);
+    this.logger.warn(`🔑 Received token: ${token}`);
+    this.logger.warn(`🔑 Expected token: ${expectedToken}`);
+    this.logger.warn(`🔑 Received token (first 10): ${token.substring(0, 10)}...`);
+    this.logger.warn(`🔑 Expected token (first 10): ${expectedToken?.substring(0, 10)}...`);
+    this.logger.warn(`🔍 Tokens match: ${token === expectedToken}`);
 
     if (!expectedToken || token !== expectedToken) {
       this.logger.warn('❌ Invalid service token');
