@@ -115,6 +115,48 @@ export class InitDbController {
       await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)`);
       await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_outbox_created_at ON outbox(created_at)`);
 
+      // Create user_permission_overrides table (for AuthzRepo)
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS user_permission_overrides (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          permission VARCHAR(255) NOT NULL,
+          action VARCHAR(10) NOT NULL CHECK (action IN ('grant', 'revoke')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user_id ON user_permission_overrides(user_id)`);
+
+      // Create user_channel_access table (for AuthzRepo)
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS user_channel_access (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          channel_id VARCHAR(255) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(user_id, channel_id)
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_user_channel_access_user_id ON user_channel_access(user_id)`);
+
+      // Create audit_logs table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          action VARCHAR(255) NOT NULL,
+          resource_type VARCHAR(100),
+          resource_id VARCHAR(255),
+          details JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`);
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`);
+
       // Create role with permissions as array of strings
       await this.pool.query(`
         INSERT INTO roles (name, permissions)
