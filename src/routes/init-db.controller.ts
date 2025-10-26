@@ -117,11 +117,12 @@ export class InitDbController {
       await this.pool.query(`
         INSERT INTO roles (name, permissions)
         VALUES ($1, $2)
-        ON CONFLICT (name) DO NOTHING
+        ON CONFLICT (name) DO UPDATE SET permissions = EXCLUDED.permissions
       `, ['Admin', JSON.stringify({
         users: { view: true, create: true, edit: true, delete: true },
         messages: { view: true, send: true, delete: true },
-        settings: { view: true, edit: true }
+        settings: { view: true, edit: true },
+        inbox: { view: true, send_message: true }
       })]);
 
       // Create user
