@@ -68,8 +68,9 @@ export class TelegramEventsController {
   @Public() // Bypass global JwtAuthGuard - this is for service-to-service auth
   @Post('telegram')
   @UseGuards(ServiceJwtGuard)
-  async handleTelegramEvent(@Body() event: TelegramEventDto) {
+  async handleTelegramEvent(@Body() event: any) {
     this.logger.log(`📨 Received Telegram event from chat ${event.chatId}`);
+    this.logger.warn(`🔍 Raw event body: ${JSON.stringify(event)}`);
     this.logger.warn(`🔍 Event text field: "${event.text}" (type: ${typeof event.text})`);
 
     try {
