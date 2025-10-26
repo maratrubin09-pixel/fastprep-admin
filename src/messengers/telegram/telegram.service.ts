@@ -207,16 +207,105 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // Stub methods for compatibility with MessengersService
   async initConnection(userId: string, data?: Record<string, unknown>): Promise<any> {
-    this.logger.warn('⚠️ initConnection called for Telegram - use telegram-login script instead');
-    return {
-      message: 'Telegram requires manual authentication via telegram-login script',
-      instructions: 'Run: npm run start:tg-login in Render Shell',
-    };
+    this.logger.log('🔐 Initializing Telegram QR login for user:', userId);
+    
+    const apiId = parseInt(process.env.TG_API_ID || '0', 10);
+    const apiHash = process.env.TG_API_HASH || '';
+
+    if (!apiId || !apiHash) {
+      throw new Error('TG_API_ID or TG_API_HASH not configured');
+    }
+
+    try {
+      // Create a new temporary client for QR login
+      const stringSession = new StringSession('');
+      const tempClient = new TelegramClient(stringSession, apiId, apiHash, {
+        connectionRetries: 5,
+      });
+
+      await tempClient.connect();
+
+      // Generate QR login token
+      const qrLogin = await tempClient.signInUserWithQrCode(
+        { apiId, apiHash },
+        {
+          onError: (err: Error) => {
+            this.logger.error('QR Login error:', err);
+          },
+          qrCode: async (code: { token: Buffer; expires: number }) => {
+            // This callback is called when QR code is ready
+            // We'll handle it in getQrCode method
+            return;
+          },
+        }
+      );
+
+      return {
+        success: true,
+        message: 'QR code generation started',
+      };
+    } catch (error) {
+      this.logger.error('Failed to init QR login:', error);
+      throw error;
+    }
   }
 
   async getQrCode(userId: string): Promise<any> {
-    this.logger.warn('⚠️ getQrCode called for Telegram - not supported');
-    throw new Error('Telegram does not support QR code authentication');
+    this.logger.log('📱 Generating Telegram QR code for user:', userId);
+    
+    const apiId = parseInt(process.env.TG_API_ID || '0', 10);
+    const apiHash = process.env.TG_API_HASH || '';
+
+    if (!apiId || !apiHash) {
+      throw new Error('TG_API_ID or TG_API_HASH not configured');
+    }
+
+    try {
+      // Create a temporary client for QR code
+      const stringSession = new StringSession('');
+      const tempClient = new TelegramClient(stringSession, apiId, apiHash, {
+        connectionRetries: 5,
+      });
+
+      await tempClient.connect();
+
+      // Generate QR login URL
+      let qrCodeUrl = '';
+      
+      await tempClient.signInUserWithQrCode(
+        { apiId, apiHash },
+        {
+          onError: (err: Error) => {
+            this.logger.error('QR code error:', err);
+          },
+          qrCode: async (code: { token: Buffer; expires: number }) => {
+            // Convert token to base64url format
+            const tokenStr = code.token.toString('base64')
+              .replace(/\+/g, '-')
+              .replace(/\//g, '_')
+              .replace(/=/g, '');
+            
+            qrCodeUrl = `tg://login?token=${tokenStr}`;
+            this.logger.log('📱 QR code generated, expires:', new Date(code.expires * 1000));
+          },
+        }
+      );
+
+      // Wait a bit for QR code to be generated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      if (!qrCodeUrl) {
+        throw new Error('Failed to generate QR code URL');
+      }
+
+      return {
+        qrCode: qrCodeUrl,
+        expiresIn: 60, // QR codes typically expire in 60 seconds
+      };
+    } catch (error) {
+      this.logger.error('Failed to get QR code:', error);
+      throw error;
+    }
   }
 
   async verifyConnection(userId: string): Promise<boolean> {
