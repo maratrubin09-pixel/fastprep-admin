@@ -14,21 +14,30 @@ import { InboxService } from './inbox.service';
 // Guard to verify SERVICE_JWT
 @Injectable()
 class ServiceJwtGuard implements CanActivate {
+  private readonly logger = new Logger('ServiceJwtGuard');
+
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      this.logger.warn('❌ Missing or invalid Authorization header');
       throw new UnauthorizedException('Missing or invalid Authorization header');
     }
 
     const token = authHeader.substring(7);
     const expectedToken = process.env.SERVICE_JWT;
 
+    this.logger.debug(`🔑 Received token (first 10): ${token.substring(0, 10)}...`);
+    this.logger.debug(`🔑 Expected token (first 10): ${expectedToken?.substring(0, 10)}...`);
+    this.logger.debug(`🔍 Tokens match: ${token === expectedToken}`);
+
     if (!expectedToken || token !== expectedToken) {
+      this.logger.warn('❌ Invalid service token');
       throw new UnauthorizedException('Invalid service token');
     }
 
+    this.logger.log('✅ Service JWT verified');
     return true;
   }
 }
