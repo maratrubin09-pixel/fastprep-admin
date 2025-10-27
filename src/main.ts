@@ -26,7 +26,11 @@ async function bootstrap() {
   });
   
   app.setGlobalPrefix('api');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(new ValidationPipe({ 
+    whitelist: true, 
+    transform: false, // ВРЕМЕННО отключаем transform для debug
+    forbidNonWhitelisted: false,
+  }));
 
   // Добавляем глобальный JWT guard
   const reflector = app.get(Reflector);
