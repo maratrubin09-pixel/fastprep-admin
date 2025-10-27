@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { IsString, IsOptional } from 'class-validator';
 import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
@@ -7,7 +8,11 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 class SendMessageDto {
+  @IsString()
   text!: string;
+  
+  @IsOptional()
+  @IsString()
   objectKey?: string;
 }
 
