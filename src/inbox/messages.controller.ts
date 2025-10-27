@@ -60,6 +60,9 @@ export class MessagesController {
   @UseGuards(PepGuard)
   @RequirePerm('inbox.send_message')
   async sendMessage(@Param('id') threadId: string, @Body() dto: SendMessageDto, @Req() req: any) {
+    console.log('🔍 DEBUG sendMessage - dto:', JSON.stringify(dto));
+    console.log('🔍 DEBUG sendMessage - dto.text:', dto.text, 'type:', typeof dto.text);
+    
     const userId = req.user?.id;
     if (!userId) {
       throw new BadRequestException('User not authenticated');
