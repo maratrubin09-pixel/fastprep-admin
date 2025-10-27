@@ -109,7 +109,7 @@ export class InboxService {
       await client.query(
         `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, created_at)
          VALUES ($1, 'message.send', 'message', $2, $3, NOW())`,
-        [senderId, message.id, JSON.stringify({ threadId, text: text.substring(0, 50) })]
+        [senderId, message.id, JSON.stringify({ threadId, text: text ? text.substring(0, 50) : '' })]
       );
 
       // Update conversation's last_message_at
