@@ -62,6 +62,7 @@ export class WorkerService implements OnModuleDestroy {
 
   private async processBatch() {
     const rows = await this.leaseBatch();
+    console.log(`🔍 leaseBatch() returned ${rows.length} rows`);
     if (rows.length === 0) return;
 
     // Параллельная обработка (CONCURRENCY)
@@ -79,6 +80,16 @@ export class WorkerService implements OnModuleDestroy {
    * Lease пачки через CTE + FOR UPDATE SKIP LOCKED
    */
   private async leaseBatch(): Promise<OutboxRow[]> {
+    // Debug: проверим, сколько pending записей есть вообще
+    const debugRes = await this.pool.query(`
+      SELECT COUNT(*) as count, 
+             COUNT(*) FILTER (WHERE scheduled_at <= NOW()) as ready_count,
+             COUNT(*) FILTER (WHERE scheduled_at > NOW()) as future_count
+      FROM outbox 
+      WHERE status = 'pending'
+    `);
+    console.log(`📊 Pending outbox stats:`, debugRes.rows[0]);
+
     const sql = `
       WITH batch AS (
         SELECT id
