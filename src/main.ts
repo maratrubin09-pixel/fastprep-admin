@@ -6,7 +6,10 @@ import { JwtAuthGuard } from './auth/jwt.guard';
 import * as express from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: true });
+  const app = await NestFactory.create(AppModule, { 
+    cors: true,
+    bodyParser: true, // Явно включаем встроенный body parser NestJS
+  });
   
   // КРИТИЧЕСКИ ВАЖНО: Body parser ПЕРЕД всеми middleware/guards!
   app.use(express.json({ limit: '10mb' }));
