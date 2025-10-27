@@ -169,27 +169,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Сериализуем InputPeer для последующего использования при отправке
-      // Получаем правильный InputPeer через getInputEntity (он включает accessHash)
+      // Берем accessHash напрямую из message._sender (доступен для входящих сообщений)
       let peerIdData = null;
-      if (this.client) {
-        try {
-          const inputPeer = await this.client.getInputEntity(chatId);
-          // Сериализуем inputPeer для сохранения в БД
-          const className = (inputPeer as any).className || inputPeer.constructor.name;
-          const serialized: any = { _: className };
-          
-          // Копируем все свойства, конвертируя BigInt в строки
-          for (const [key, value] of Object.entries(inputPeer)) {
-            if (key !== 'className') {
-              serialized[key] = typeof value === 'bigint' ? value.toString() : value;
-            }
-          }
+      try {
+        const sender = message._sender;
+        if (sender && sender.id) {
+          const serialized: any = {
+            _: 'InputPeerUser',
+            userId: String(sender.id),
+            accessHash: sender.accessHash ? String(sender.accessHash) : '0'
+          };
           
           peerIdData = JSON.stringify(serialized);
-          this.logger.debug(`📦 Saved InputPeer: ${peerIdData}`);
-        } catch (error) {
-          this.logger.warn(`⚠️ Could not get InputPeer for ${chatId}: ${error}`);
+          this.logger.log(`📦 Saved InputPeer from message._sender: ${peerIdData}`);
+        } else {
+          this.logger.warn(`⚠️ No _sender in message, cannot save InputPeer`);
         }
+      } catch (error) {
+        this.logger.warn(`⚠️ Could not extract InputPeer from message: ${error}`);
       }
 
       const payload = {
