@@ -1,7 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
-import { WhatsAppService } from './whatsapp/whatsapp.service';
 import { TelegramService } from './telegram/telegram.service';
 import { InstagramService } from './instagram/instagram.service';
 import { FacebookService } from './facebook/facebook.service';
@@ -10,7 +9,6 @@ import { FacebookService } from './facebook/facebook.service';
 export class MessengersService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
-    private readonly whatsappService: WhatsAppService,
     private readonly telegramService: TelegramService,
     private readonly instagramService: InstagramService,
     private readonly facebookService: FacebookService
@@ -27,8 +25,6 @@ export class MessengersService {
 
   private getServiceForPlatform(platform: string) {
     switch (platform.toLowerCase()) {
-      case 'whatsapp':
-        return this.whatsappService;
       case 'telegram':
         return this.telegramService;
       case 'instagram':
@@ -42,7 +38,7 @@ export class MessengersService {
 
   async getStatus(token: string) {
     // For testing: return mock status without checking token
-    const platforms = ['whatsapp', 'telegram', 'instagram', 'facebook'];
+    const platforms = ['telegram', 'instagram', 'facebook'];
     const status: Record<string, any> = {};
     
     platforms.forEach(platform => {
