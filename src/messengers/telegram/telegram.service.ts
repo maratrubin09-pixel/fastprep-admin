@@ -220,7 +220,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       this.logger.log(`📤 Sending message to chat ${chatId}`);
 
-      const result = await this.client.sendMessage(Number(chatId), {
+      // Получаем entity (InputPeer) для корректной отправки
+      const entity = await this.client.getEntity(chatId);
+      
+      const result = await this.client.sendMessage(entity, {
         message: text,
       });
 
