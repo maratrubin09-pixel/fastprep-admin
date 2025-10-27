@@ -100,9 +100,9 @@ export class InboxService {
       const message = msgRes.rows[0];
 
       await client.query(
-        `INSERT INTO outbox (message_id, status, scheduled_at, attempts, created_at)
-         VALUES ($1, 'pending', NOW(), 0, NOW())`,
-        [message.id]
+        `INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
+         VALUES ($1, $2, 'pending', NOW(), 0, NOW())`,
+        [message.id, threadId]
       );
 
       // audit_log (с EP-snapshot — упрощённо)
