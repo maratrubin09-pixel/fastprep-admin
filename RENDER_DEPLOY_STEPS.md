@@ -167,3 +167,6 @@ curl https://fastprep-admin-api.onrender.com/api
 **Стоимость:** ~$21/мес (Postgres+Redis+API+Worker, без TG Adapter)
 
 
+
+
+

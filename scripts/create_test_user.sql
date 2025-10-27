@@ -33,3 +33,6 @@ ON CONFLICT (email) DO NOTHING;
 SELECT id, email, name, role_id FROM users WHERE email = 'admin@fastprepusa.com';
 
 
+
+
+

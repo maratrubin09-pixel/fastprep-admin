@@ -54,6 +54,7 @@ export class MessagesController {
    * POST /api/inbox/conversations/:id/messages
    * Валидация objectKey (HEAD: существует, допустимый MIME/размер, префикс inbox/{threadId}/)
    * Транзакция: messages (out, delivery_status='queued') → outbox (pending) → audit_logs
+   * Возвращает 201 с полными данными сообщения для немедленного отображения в UI
    */
   @Post('conversations/:id/messages')
   @UseGuards(PepGuard)
@@ -85,10 +86,11 @@ export class MessagesController {
       }
     }
 
-    // Создание сообщения + outbox + audit
-    const messageId = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
+    // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
+    const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
 
-    return { status: 'queued', messageId };
+    // Возвращаем 201 Created с полными данными сообщения
+    return message;
   }
 }
 

@@ -9,19 +9,54 @@ import * as path from 'path';
 export class InitDbController {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
-  @Public() // Миграция для добавления колонок в outbox
+  @Public() // Миграция для добавления колонок и индексов
   @Post('migrate')
   async migrateDatabase() {
     try {
+      // Добавить колонки в outbox (если еще не добавлены)
       await this.pool.query(`
         ALTER TABLE outbox ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
       `);
       await this.pool.query(`
         ALTER TABLE outbox ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
       `);
+
+      // Добавить колонки в conversations для имен чатов
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_title VARCHAR(500);
+      `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_type VARCHAR(50);
+      `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS participant_count INT;
+      `);
+
+      // Добавить колонки в messages (если нужны)
+      await this.pool.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES users(id) ON DELETE SET NULL;
+      `);
+      await this.pool.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS object_key VARCHAR(500);
+      `);
+
+      // Добавить оптимизированные индексы
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_last_message_at 
+        ON conversations (last_message_at DESC NULLS LAST);
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_created_at 
+        ON messages (conversation_id, created_at DESC);
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_outbox_status_scheduled_at
+        ON outbox (status, scheduled_at ASC);
+      `);
+
       return { 
         success: true, 
-        message: 'Migration completed: added scheduled_at and attempts columns to outbox table' 
+        message: 'Migration completed: added columns and indexes for Phase 1' 
       };
     } catch (error: any) {
       return { 

@@ -231,3 +231,6 @@ git add frontend && git commit -m "Add frontend stub" && git push
 **Время деплоя:** ~20-30 минут (включая настройку credentials)
 
 
+
+
+

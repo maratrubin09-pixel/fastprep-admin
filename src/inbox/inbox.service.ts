@@ -79,40 +79,47 @@ export class InboxService {
 
   /**
    * Создание исходящего сообщения: INSERT messages + INSERT outbox (транзакционно)
+   * Возвращает полные данные созданного сообщения для немедленного отображения в UI
    */
   async createOutgoingMessage(
     threadId: string,
     senderId: string,
     text: string,
     objectKey?: string
-  ): Promise<string> {
+  ): Promise<any> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
       const msgRes = await client.query(
-        `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, delivery_status, created_at)
-         VALUES ($1, $2, 'out', $3, $4, 'queued', NOW())
-         RETURNING id`,
+        `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, delivery_status, created_at, updated_at)
+         VALUES ($1, $2, 'out', $3, $4, 'queued', NOW(), NOW())
+         RETURNING *`,
         [threadId, senderId, text, objectKey]
       );
-      const messageId = msgRes.rows[0].id;
+      const message = msgRes.rows[0];
 
       await client.query(
         `INSERT INTO outbox (message_id, status, scheduled_at, attempts, created_at)
          VALUES ($1, 'pending', NOW(), 0, NOW())`,
-        [messageId]
+        [message.id]
       );
 
       // audit_log (с EP-snapshot — упрощённо)
       await client.query(
         `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, created_at)
          VALUES ($1, 'message.send', 'message', $2, $3, NOW())`,
-        [senderId, messageId, JSON.stringify({ threadId, text: text.substring(0, 50) })]
+        [senderId, message.id, JSON.stringify({ threadId, text: text.substring(0, 50) })]
+      );
+
+      // Update conversation's last_message_at
+      await client.query(
+        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [threadId]
       );
 
       await client.query('COMMIT');
-      return messageId;
+      return message;
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -128,6 +135,9 @@ export class InboxService {
     channel_id: string;
     external_chat_id?: string;
     platform?: string;
+    chat_title?: string;
+    chat_type?: string;
+    participant_count?: number;
   }): Promise<any> {
     const client = await this.pool.connect();
     try {
@@ -138,15 +148,39 @@ export class InboxService {
       );
 
       if (existingThread.rows.length > 0) {
+        // Update chat info if provided
+        if (params.chat_title || params.chat_type || params.participant_count) {
+          await client.query(
+            `UPDATE conversations 
+             SET chat_title = COALESCE($1, chat_title),
+                 chat_type = COALESCE($2, chat_type),
+                 participant_count = COALESCE($3, participant_count),
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [params.chat_title, params.chat_type, params.participant_count, existingThread.rows[0].id]
+          );
+          // Fetch updated thread
+          const updated = await client.query(
+            `SELECT * FROM conversations WHERE id = $1`,
+            [existingThread.rows[0].id]
+          );
+          return updated.rows[0];
+        }
         return existingThread.rows[0];
       }
 
-      // Create new thread
+      // Create new thread with chat info
       const result = await client.query(
-        `INSERT INTO conversations (channel_id, external_chat_id, status, created_at, updated_at)
-         VALUES ($1, $2, 'open', NOW(), NOW())
+        `INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'open', NOW(), NOW())
          RETURNING *`,
-        [params.channel_id, params.external_chat_id || null]
+        [
+          params.channel_id,
+          params.external_chat_id || null,
+          params.chat_title || null,
+          params.chat_type || null,
+          params.participant_count || null
+        ]
       );
 
       const thread = result.rows[0];

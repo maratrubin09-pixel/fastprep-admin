@@ -5,12 +5,26 @@ import { NewMessage } from 'telegram/events';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Gauge, register } from 'prom-client';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private client: TelegramClient | null = null;
   private isReady = false;
+  
+  // Prometheus метрика для статуса подключения
+  private readonly connectionStatus: Gauge<string>;
+
+  constructor() {
+    this.connectionStatus = new Gauge({
+      name: 'telegram_connection_status',
+      help: 'Telegram connection status (1=OK, 0=Down)',
+      registers: [register],
+    });
+    // Инициализируем как 0 (не подключено)
+    this.connectionStatus.set(0);
+  }
 
   async onModuleInit() {
     // Only initialize persistent client in Worker (not API)
@@ -26,6 +40,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     if (this.client) {
       await this.client.disconnect();
+      this.connectionStatus.set(0); // Установить статус: отключено
       this.logger.log('🔌 Telegram client disconnected');
     }
   }
@@ -70,6 +85,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       
       if (authorized) {
         this.isReady = true;
+        this.connectionStatus.set(1); // Установить статус: подключено
         const me = await this.client.getMe();
         this.logger.log(`✅ Telegram connected as: ${me.firstName} ${me.lastName || ''} (@${me.username || 'N/A'})`);
 
@@ -77,6 +93,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         const session = this.client.session.save() as unknown as string;
         fs.writeFileSync(sessionFile, session, 'utf8');
       } else {
+        this.isReady = false;
+        this.connectionStatus.set(0); // Установить статус: не подключено
         this.logger.warn(`⚠️ Telegram not authenticated.`);
         this.logger.warn('Run: npm run start:tg-login in Render Shell to authenticate');
       }
@@ -86,6 +104,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     } catch (error) {
       this.logger.error('❌ Failed to initialize Telegram client:', error);
+      this.connectionStatus.set(0); // Установить статус: ошибка подключения
     }
   }
 

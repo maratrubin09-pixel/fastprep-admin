@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Paper,
   Typography,
@@ -22,7 +22,10 @@ import {
   Instagram as InstagramIcon,
   Facebook as FacebookIcon,
   Send as SendIcon,
+  Done as DoneIcon,
+  DoneAll as DoneAllIcon,
 } from '@mui/icons-material';
+import { io } from 'socket.io-client';
 import DashboardLayout from '../components/DashboardLayout';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
@@ -42,11 +45,90 @@ const InboxPage = () => {
   const [error, setError] = useState(null);
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
+  const socketRef = useRef(null);
 
   // Fetch conversations on mount
   useEffect(() => {
     fetchConversations();
   }, []);
+
+  // Setup WebSocket connection
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Decode JWT to get userId (simple base64 decode)
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const userId = payload.sub || payload.id;
+
+      // Connect to WebSocket
+      const socket = io(`${API_URL}/ws`, {
+        auth: {
+          userId: userId,
+          token: token,
+        },
+      });
+
+      socket.on('connect', () => {
+        console.log('✅ WebSocket connected');
+      });
+
+      socket.on('hello', (data) => {
+        console.log('👋 Hello from server:', data);
+      });
+
+      // Handle incoming messages
+      socket.on('new_message', (data) => {
+        console.log('📨 New message received:', data);
+        
+        // Add message to current conversation if it's selected
+        if (selectedThread && data.conversationId === selectedThread.id) {
+          setMessages(prev => [...prev, data.message]);
+        }
+
+        // Update conversations list (move to top and update last_message_at)
+        setConversations(prev => {
+          const updated = prev.map(conv => 
+            conv.id === data.conversationId 
+              ? { ...conv, last_message_at: data.message.created_at }
+              : conv
+          );
+          // Sort by last_message_at
+          return updated.sort((a, b) => 
+            new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at)
+          );
+        });
+      });
+
+      // Handle message status updates
+      socket.on('message_status_update', (data) => {
+        console.log('📊 Message status update:', data);
+        
+        // Update message status in current conversation
+        if (selectedThread && data.conversationId === selectedThread.id) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === data.messageId 
+              ? { ...msg, delivery_status: data.status }
+              : msg
+          ));
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('❌ WebSocket disconnected');
+      });
+
+      socketRef.current = socket;
+
+      // Cleanup on unmount
+      return () => {
+        socket.disconnect();
+      };
+    } catch (err) {
+      console.error('Failed to setup WebSocket:', err);
+    }
+  }, [selectedThread]);
 
   // Fetch messages when thread is selected
   useEffect(() => {
@@ -124,9 +206,27 @@ const InboxPage = () => {
         throw new Error('Failed to send message');
       }
       
+      // Получаем созданное сообщение из ответа
+      const newMessage = await response.json();
+      
+      // Немедленно добавляем сообщение в UI со статусом "queued" (отправляется...)
+      setMessages(prev => [...prev, newMessage]);
+      
+      // Очищаем поле ввода
       setMessageText('');
-      // Refresh messages
-      await fetchMessages(selectedThread.id);
+      
+      // Обновляем список чатов (переместить текущий чат наверх)
+      setConversations(prev => {
+        const updated = prev.map(conv => 
+          conv.id === selectedThread.id 
+            ? { ...conv, last_message_at: new Date().toISOString() }
+            : conv
+        );
+        // Сортируем по last_message_at
+        return updated.sort((a, b) => 
+          new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at)
+        );
+      });
     } catch (err) {
       alert('Failed to send message: ' + err.message);
     } finally {
@@ -218,7 +318,7 @@ const InboxPage = () => {
                       primary={
                         <Box display="flex" justifyContent="space-between" alignItems="center">
                           <Typography variant="subtitle1" fontWeight="bold">
-                            {conv.external_chat_id || 'Unknown'}
+                            {conv.chat_title || conv.external_chat_id || 'Unknown'}
                           </Typography>
                           <Chip
                             label={platform}
@@ -249,7 +349,7 @@ const InboxPage = () => {
                   </Avatar>
                   <Box>
                     <Typography variant="h6" fontWeight="bold">
-                      {selectedThread.external_chat_id || 'Unknown'}
+                      {selectedThread.chat_title || selectedThread.external_chat_id || 'Unknown'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {selectedThread.channel_id}
@@ -288,16 +388,33 @@ const InboxPage = () => {
                             </Typography>
                           )}
                           <Typography variant="body1">{msg.text}</Typography>
-                          <Typography
-                            variant="caption"
+                          <Box
                             sx={{
-                              display: 'block',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
                               mt: 0.5,
-                              opacity: 0.7,
                             }}
                           >
-                            {formatTime(msg.created_at)}
-                          </Typography>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                opacity: 0.7,
+                              }}
+                            >
+                              {formatTime(msg.created_at)}
+                            </Typography>
+                            {msg.direction === 'out' && (
+                              <>
+                                {msg.delivery_status === 'queued' && (
+                                  <DoneIcon sx={{ fontSize: 14, opacity: 0.7 }} />
+                                )}
+                                {msg.delivery_status === 'sent' && (
+                                  <DoneAllIcon sx={{ fontSize: 14, opacity: 0.7 }} />
+                                )}
+                              </>
+                            )}
+                          </Box>
                         </Paper>
                       </Box>
                     ))}
@@ -347,4 +464,7 @@ const InboxPage = () => {
 };
 
 export default InboxPage;
+
+
+
 

@@ -11,6 +11,7 @@ import {
   Get,
 } from '@nestjs/common';
 import { InboxService } from './inbox.service';
+import { WsGateway } from './ws.gateway';
 import { Public } from '../auth/public.decorator';
 
 // Guard to verify SERVICE_JWT
@@ -30,18 +31,11 @@ class ServiceJwtGuard implements CanActivate {
     const token = authHeader.substring(7);
     const expectedToken = process.env.SERVICE_JWT;
 
-    this.logger.warn(`🔑 Received token: ${token}`);
-    this.logger.warn(`🔑 Expected token: ${expectedToken}`);
-    this.logger.warn(`🔑 Received token (first 10): ${token.substring(0, 10)}...`);
-    this.logger.warn(`🔑 Expected token (first 10): ${expectedToken?.substring(0, 10)}...`);
-    this.logger.warn(`🔍 Tokens match: ${token === expectedToken}`);
-
     if (!expectedToken || token !== expectedToken) {
       this.logger.warn('❌ Invalid service token');
       throw new UnauthorizedException('Invalid service token');
     }
 
-    this.logger.log('✅ Service JWT verified');
     return true;
   }
 }
@@ -63,15 +57,16 @@ class TelegramEventDto {
 export class TelegramEventsController {
   private readonly logger = new Logger(TelegramEventsController.name);
 
-  constructor(private readonly inboxService: InboxService) {}
+  constructor(
+    private readonly inboxService: InboxService,
+    private readonly wsGateway: WsGateway
+  ) {}
 
   @Public() // Bypass global JwtAuthGuard - this is for service-to-service auth
   @Post('telegram')
   @UseGuards(ServiceJwtGuard)
   async handleTelegramEvent(@Body() event: any) {
     this.logger.log(`📨 Received Telegram event from chat ${event.chatId}`);
-    this.logger.warn(`🔍 Raw event body: ${JSON.stringify(event)}`);
-    this.logger.warn(`🔍 Event text field: "${event.text}" (type: ${typeof event.text})`);
 
     try {
       // Find or create conversation thread
@@ -79,6 +74,8 @@ export class TelegramEventsController {
         channel_id: `telegram:${event.chatId}`,
         external_chat_id: event.chatId,
         platform: 'telegram',
+        chat_title: event.chatTitle,
+        chat_type: event.chatType || 'private',
       });
 
       // Save incoming message
@@ -99,10 +96,13 @@ export class TelegramEventsController {
 
       this.logger.log(`✅ Message ${message.id} saved to thread ${thread.id}`);
 
-      // Notify WebSocket clients (if gateway is available)
+      // Отправляем WebSocket событие всем подключенным клиентам
       try {
-        // This would be handled by InboxGateway if it exists
-        // await this.inboxGateway.notifyNewMessage(thread.id, message);
+        await this.wsGateway.emitInboxEvent(thread.id, 'new_message', {
+          conversationId: thread.id,
+          message: message,
+        });
+        this.logger.log(`📡 WebSocket event sent for thread ${thread.id}`);
       } catch (error) {
         this.logger.warn('Could not notify WebSocket clients:', error);
       }
@@ -135,18 +135,28 @@ export class TelegramEventsController {
     }
   }
 
-  // Diagnostic endpoint to verify ENV variables
-  @Public()
-  @Get('debug/env')
-  debugEnv() {
-    const serviceJwt = process.env.SERVICE_JWT;
-    this.logger.log('DEBUG: Checking ENV variables');
-    return {
-      SERVICE_JWT_EXISTS: !!serviceJwt,
-      SERVICE_JWT_LENGTH: serviceJwt?.length || 0,
-      SERVICE_JWT_FIRST_10: serviceJwt?.substring(0, 10) || null,
-      NODE_ENV: process.env.NODE_ENV,
-    };
+  @Public() // Bypass global JwtAuthGuard
+  @Post('message-status')
+  @UseGuards(ServiceJwtGuard)
+  async handleMessageStatusUpdate(@Body() payload: { conversationId: string; messageId: string; status: string }) {
+    this.logger.log(`📊 Message status update: ${payload.messageId} -> ${payload.status}`);
+
+    try {
+      // Отправляем WebSocket событие всем подключенным клиентам
+      await this.wsGateway.emitInboxEvent(payload.conversationId, 'message_status_update', {
+        conversationId: payload.conversationId,
+        messageId: payload.messageId,
+        status: payload.status,
+      });
+
+      this.logger.log(`📡 WebSocket status update sent for message ${payload.messageId}`);
+
+      return { success: true };
+    } catch (error: any) {
+      this.logger.error('Error handling message status update:', error);
+      throw error;
+    }
   }
+
 }
 

@@ -4,6 +4,7 @@ import { PG_POOL } from '../db/db.module';
 import { MetricsService } from './metrics.service';
 import { AlertsService } from './alerts.service';
 import { TelegramService } from '../messengers/telegram/telegram.service';
+import axios from 'axios';
 
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
 const BASE_BACKOFF_MS = Number(process.env.OUTBOX_BASE_BACKOFF_MS || 1000);
@@ -52,7 +53,7 @@ export class WorkerService implements OnModuleDestroy {
         console.error('Worker loop error:', err);
       }
 
-      // Задержка 1 секунда
+      // Задержка 1 секунда (оптимизировано с 5 сек)
       await new Promise((resolve) => {
         this.timer = setTimeout(resolve, 1000);
       });
@@ -153,6 +154,9 @@ export class WorkerService implements OnModuleDestroy {
         );
         await client.query('COMMIT');
         this.metrics.outboxProcessedTotal.inc({ status: 'done' });
+
+        // Уведомляем API об обновлении статуса через WebSocket
+        await this.notifyMessageStatusUpdate(msg.conversation_id, row.message_id, 'sent');
       } else {
         // Ошибка: retry или failed
         const errorMsg = result.error || 'Unknown error';
@@ -264,6 +268,38 @@ export class WorkerService implements OnModuleDestroy {
       `UPDATE outbox SET status = 'pending', scheduled_at = $1, last_error = $2, updated_at = NOW() WHERE id = $3`,
       [scheduledAt, error, outboxId]
     );
+  }
+
+  /**
+   * Уведомление API об обновлении статуса сообщения (для WebSocket broadcast)
+   */
+  private async notifyMessageStatusUpdate(conversationId: string, messageId: string, status: string) {
+    try {
+      const backendUrl = process.env.BACKEND_URL;
+      const serviceJwt = process.env.SERVICE_JWT;
+
+      if (!backendUrl || !serviceJwt) {
+        console.warn('⚠️ BACKEND_URL or SERVICE_JWT not set, skipping status update notification');
+        return;
+      }
+
+      await axios.post(
+        `${backendUrl}/api/inbox/events/message-status`,
+        {
+          conversationId,
+          messageId,
+          status,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${serviceJwt}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    } catch (error: any) {
+      console.error('Failed to notify message status update:', error.message);
+    }
   }
 }
 
