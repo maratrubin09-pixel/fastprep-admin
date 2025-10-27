@@ -46,6 +46,7 @@ const InboxPage = () => {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const socketRef = useRef(null);
+  const messageInputRef = useRef(null);
 
   // Fetch conversations on mount
   useEffect(() => {
@@ -186,7 +187,11 @@ const InboxPage = () => {
   };
 
   const sendMessage = async () => {
-    if (!messageText.trim() || !selectedThread) return;
+    // Читаем текст напрямую из input через ref
+    const text = messageInputRef.current?.value || messageText;
+    console.log('🔍 Frontend sendMessage - text:', text, 'from ref:', messageInputRef.current?.value, 'from state:', messageText);
+    
+    if (!text.trim() || !selectedThread) return;
     
     try {
       setSending(true);
@@ -198,7 +203,7 @@ const InboxPage = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: messageText,
+          text: text,
         }),
       });
       
@@ -214,6 +219,9 @@ const InboxPage = () => {
       
       // Очищаем поле ввода
       setMessageText('');
+      if (messageInputRef.current) {
+        messageInputRef.current.value = '';
+      }
       
       // Обновляем список чатов (переместить текущий чат наверх)
       setConversations(prev => {
@@ -426,6 +434,7 @@ const InboxPage = () => {
               <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
                 <Box display="flex" gap={1}>
                   <TextField
+                    inputRef={messageInputRef}
                     fullWidth
                     placeholder="Type a message..."
                     value={messageText}
