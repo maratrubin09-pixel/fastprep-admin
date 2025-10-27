@@ -119,12 +119,13 @@ export class WorkerService implements OnModuleDestroy {
 
       const msg = msgRes.rows[0];
 
-      // Определяем платформу из channel_id
+      // Определяем платформу из channel_id и получаем telegram_peer_id
       const convRes = await client.query(
-        `SELECT channel_id FROM conversations WHERE id = $1`,
+        `SELECT channel_id, telegram_peer_id FROM conversations WHERE id = $1`,
         [msg.conversation_id]
       );
       const channelId = convRes.rows[0]?.channel_id || '';
+      const telegramPeerId = convRes.rows[0]?.telegram_peer_id || null;
       const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
 
       // Вызов соответствующего сервиса
@@ -132,7 +133,7 @@ export class WorkerService implements OnModuleDestroy {
       let result: { success: boolean; externalMessageId?: string; error?: string };
 
       if (platform === 'telegram') {
-        result = await this.sendViaTelegram(channelId, msg.text);
+        result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId);
       } else {
         // Fallback to TG-Adapter for legacy
         result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
@@ -188,7 +189,8 @@ export class WorkerService implements OnModuleDestroy {
    */
   private async sendViaTelegram(
     channelId: string,
-    text: string
+    text: string,
+    telegramPeerId?: string | null
   ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
     try {
       // Extract chat ID from channel_id format: "telegram:12345"
@@ -197,7 +199,7 @@ export class WorkerService implements OnModuleDestroy {
         return { success: false, error: 'Invalid channel_id format' };
       }
 
-      const result = await this.telegramService.sendMessage(chatId, text);
+      const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
       return {
         success: true,
         externalMessageId: String(result.id),

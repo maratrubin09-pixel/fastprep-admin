@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { NewMessage } from 'telegram/events';
+import { Api } from 'telegram/tl';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -166,6 +167,30 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      // Сериализуем InputPeer для последующего использования при отправке
+      // Получаем правильный InputPeer через getInputEntity (он включает accessHash)
+      let peerIdData = null;
+      if (this.client) {
+        try {
+          const inputPeer = await this.client.getInputEntity(chatId);
+          // Сериализуем inputPeer для сохранения в БД
+          const className = (inputPeer as any).className || inputPeer.constructor.name;
+          const serialized: any = { _: className };
+          
+          // Копируем все свойства, конвертируя BigInt в строки
+          for (const [key, value] of Object.entries(inputPeer)) {
+            if (key !== 'className') {
+              serialized[key] = typeof value === 'bigint' ? value.toString() : value;
+            }
+          }
+          
+          peerIdData = JSON.stringify(serialized);
+          this.logger.debug(`📦 Saved InputPeer: ${peerIdData}`);
+        } catch (error) {
+          this.logger.warn(`⚠️ Could not get InputPeer for ${chatId}: ${error}`);
+        }
+      }
+
       const payload = {
         platform: 'telegram',
         chatId: String(chatId),
@@ -176,6 +201,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         text,
         attachments,
         timestamp: message.date * 1000,
+        telegramPeerId: peerIdData,
         raw: message,
       };
 
@@ -212,7 +238,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendMessage(chatId: string | number, text: string): Promise<any> {
+  async sendMessage(chatId: string | number, text: string, telegramPeerId?: string | null): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');
     }
@@ -220,8 +246,43 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       this.logger.log(`📤 Sending message to chat ${chatId}`);
 
-      // Получаем entity (InputPeer) для корректной отправки
-      const entity = await this.client.getEntity(chatId);
+      let entity;
+      
+      // Если есть сохраненный InputPeer, используем его (самый надежный способ)
+      if (telegramPeerId) {
+        try {
+          const parsed = JSON.parse(telegramPeerId);
+          this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
+          
+          // Воссоздаем InputPeer из сохраненных данных
+          if (parsed._ === 'InputPeerUser') {
+            entity = new Api.InputPeerUser({
+              userId: BigInt(parsed.userId),
+              accessHash: BigInt(parsed.accessHash || 0),
+            });
+          } else if (parsed._ === 'InputPeerChat') {
+            entity = new Api.InputPeerChat({
+              chatId: BigInt(parsed.chatId),
+            });
+          } else if (parsed._ === 'InputPeerChannel') {
+            entity = new Api.InputPeerChannel({
+              channelId: BigInt(parsed.channelId),
+              accessHash: BigInt(parsed.accessHash || 0),
+            });
+          } else {
+            throw new Error(`Unknown InputPeer type: ${parsed._}`);
+          }
+          
+          this.logger.log(`✅ Reconstructed InputPeer successfully`);
+        } catch (error) {
+          this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
+          entity = await this.client.getEntity(chatId);
+        }
+      } else {
+        // Fallback: пытаемся получить entity напрямую
+        this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
+        entity = await this.client.getEntity(chatId);
+      }
       
       const result = await this.client.sendMessage(entity, {
         message: text,

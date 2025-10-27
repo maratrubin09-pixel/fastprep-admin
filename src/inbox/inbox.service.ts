@@ -138,6 +138,7 @@ export class InboxService {
     chat_title?: string;
     chat_type?: string;
     participant_count?: number;
+    telegram_peer_id?: string;
   }): Promise<any> {
     const client = await this.pool.connect();
     try {
@@ -149,15 +150,16 @@ export class InboxService {
 
       if (existingThread.rows.length > 0) {
         // Update chat info if provided
-        if (params.chat_title || params.chat_type || params.participant_count) {
+        if (params.chat_title || params.chat_type || params.participant_count || params.telegram_peer_id) {
           await client.query(
             `UPDATE conversations 
              SET chat_title = COALESCE($1, chat_title),
                  chat_type = COALESCE($2, chat_type),
                  participant_count = COALESCE($3, participant_count),
+                 telegram_peer_id = COALESCE($4, telegram_peer_id),
                  updated_at = NOW()
-             WHERE id = $4`,
-            [params.chat_title, params.chat_type, params.participant_count, existingThread.rows[0].id]
+             WHERE id = $5`,
+            [params.chat_title, params.chat_type, params.participant_count, params.telegram_peer_id, existingThread.rows[0].id]
           );
           // Fetch updated thread
           const updated = await client.query(
@@ -171,15 +173,16 @@ export class InboxService {
 
       // Create new thread with chat info
       const result = await client.query(
-        `INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'open', NOW(), NOW())
+        `INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, telegram_peer_id, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'open', NOW(), NOW())
          RETURNING *`,
         [
           params.channel_id,
           params.external_chat_id || null,
           params.chat_title || null,
           params.chat_type || null,
-          params.participant_count || null
+          params.participant_count || null,
+          params.telegram_peer_id || null
         ]
       );
 

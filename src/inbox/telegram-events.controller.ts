@@ -50,6 +50,7 @@ class TelegramEventDto {
   text!: string;
   attachments?: any[];
   timestamp!: number;
+  telegramPeerId?: string;
   raw?: any;
 }
 
@@ -76,6 +77,7 @@ export class TelegramEventsController {
         platform: 'telegram',
         chat_title: event.chatTitle,
         chat_type: event.chatType || 'private',
+        telegram_peer_id: event.telegramPeerId,
       });
 
       // Save incoming message

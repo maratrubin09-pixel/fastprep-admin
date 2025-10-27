@@ -31,6 +31,9 @@ export class InitDbController {
       await this.pool.query(`
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS participant_count INT;
       `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS telegram_peer_id TEXT;
+      `);
 
       // Добавить колонки в messages (если нужны)
       await this.pool.query(`
