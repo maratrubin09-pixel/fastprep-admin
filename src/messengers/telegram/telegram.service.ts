@@ -3,6 +3,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { NewMessage } from 'telegram/events';
 import { Api } from 'telegram/tl';
+import bigInt from 'big-integer';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -257,17 +258,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           // Воссоздаем InputPeer из сохраненных данных
           if (parsed._ === 'InputPeerUser') {
             entity = new Api.InputPeerUser({
-              userId: BigInt(parsed.userId),
-              accessHash: BigInt(parsed.accessHash || 0),
+              userId: bigInt(parsed.userId),
+              accessHash: bigInt(parsed.accessHash || '0'),
             });
           } else if (parsed._ === 'InputPeerChat') {
             entity = new Api.InputPeerChat({
-              chatId: BigInt(parsed.chatId),
+              chatId: bigInt(parsed.chatId),
             });
           } else if (parsed._ === 'InputPeerChannel') {
             entity = new Api.InputPeerChannel({
-              channelId: BigInt(parsed.channelId),
-              accessHash: BigInt(parsed.accessHash || 0),
+              channelId: bigInt(parsed.channelId),
+              accessHash: bigInt(parsed.accessHash || '0'),
             });
           } else {
             throw new Error(`Unknown InputPeer type: ${parsed._}`);
