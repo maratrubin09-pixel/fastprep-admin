@@ -16,7 +16,7 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   
   // DEBUG: Логируем raw body для всех POST запросов
-  app.use((req, res, next) => {
+  app.use((req: any, res: any, next: any) => {
     if (req.method === 'POST' && req.path.includes('/messages')) {
       console.log('🔍 RAW REQUEST - path:', req.path);
       console.log('🔍 RAW REQUEST - body:', JSON.stringify(req.body));
