@@ -159,8 +159,15 @@ export class InboxService {
         let paramIndex = 1;
 
         if (params.chat_title !== undefined) {
-          updates.push(`chat_title = COALESCE($${paramIndex++}, chat_title)`);
-          values.push(params.chat_title);
+          // Обновляем chat_title, даже если он был "Unknown" - новое значение имеет приоритет
+          if (params.chat_title && params.chat_title !== 'Unknown') {
+            updates.push(`chat_title = $${paramIndex++}`);
+            values.push(params.chat_title);
+          } else if (params.chat_title === null) {
+            // Если передали null явно, обновляем
+            updates.push(`chat_title = $${paramIndex++}`);
+            values.push(params.chat_title);
+          }
         }
         if (params.chat_type !== undefined) {
           updates.push(`chat_type = COALESCE($${paramIndex++}, chat_type)`);
@@ -170,8 +177,9 @@ export class InboxService {
           updates.push(`participant_count = COALESCE($${paramIndex++}, participant_count)`);
           values.push(params.participant_count);
         }
-        if (params.telegram_peer_id !== undefined) {
-          updates.push(`telegram_peer_id = COALESCE($${paramIndex++}, telegram_peer_id)`);
+        if (params.telegram_peer_id !== undefined && params.telegram_peer_id !== null) {
+          // telegram_peer_id имеет приоритет - если есть, всегда обновляем (даже если было null)
+          updates.push(`telegram_peer_id = $${paramIndex++}`);
           values.push(params.telegram_peer_id);
         }
         if (params.sender_phone !== undefined) {

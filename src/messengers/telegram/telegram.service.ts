@@ -177,7 +177,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
 
         // Если senderId есть, но не получили информацию из chat entity, попробуем получить отдельно
-        if (senderId && senderName === 'Unknown') {
+        if (senderId && (senderName === 'Unknown' || chatTitle === 'Unknown')) {
           try {
             const sender = await this.client.getEntity(senderId);
             senderFirstName = (sender as any).firstName || null;
@@ -186,10 +186,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             senderPhone = (sender as any).phone || null;
             senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || 'Unknown';
             
+            // Обновляем chatTitle из senderName, если он был "Unknown"
+            if (chatTitle === 'Unknown' && senderName !== 'Unknown') {
+              chatTitle = senderName;
+            }
+            
             this.logger.log(`✅ Extracted sender info: ${senderName} (@${senderUsername || 'N/A'}, ${senderPhone || 'N/A'})`);
           } catch (error) {
             this.logger.warn(`Could not fetch sender info for ${senderId}: ${error}`);
           }
+        }
+        
+        // Если chatTitle все еще "Unknown", но у нас есть информация о sender, используем ее
+        if (chatTitle === 'Unknown' && senderName !== 'Unknown') {
+          chatTitle = senderName;
         }
       }
 
