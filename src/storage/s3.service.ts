@@ -85,6 +85,38 @@ export class S3Service {
     });
     return getSignedUrl(this.client, command, { expiresIn });
   }
+
+  /**
+   * Скачать файл из S3
+   */
+  async getObject(key: string): Promise<{ body: Buffer; contentType?: string }> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    });
+    
+    const response = await this.client.send(command);
+    
+    if (!response.Body) {
+      throw new Error(`File not found in S3: ${key}`);
+    }
+
+    // Конвертируем stream в Buffer
+    const chunks: Uint8Array[] = [];
+    const stream = response.Body as any;
+    
+    return new Promise((resolve, reject) => {
+      stream.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+      stream.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        resolve({
+          body: buffer,
+          contentType: response.ContentType,
+        });
+      });
+      stream.on('error', reject);
+    });
+  }
 }
 
 

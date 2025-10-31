@@ -4,6 +4,7 @@ import { PG_POOL } from '../db/db.module';
 import { MetricsService } from './metrics.service';
 import { AlertsService } from './alerts.service';
 import { TelegramService } from '../messengers/telegram/telegram.service';
+import { S3Service } from '../storage/s3.service';
 import axios from 'axios';
 
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
@@ -27,7 +28,8 @@ export class WorkerService implements OnModuleDestroy {
     @Inject(PG_POOL) private pool: Pool,
     private metrics: MetricsService,
     private alerts: AlertsService,
-    private telegramService: TelegramService
+    private telegramService: TelegramService,
+    private s3Service: S3Service
   ) {}
 
   async start() {
@@ -146,7 +148,7 @@ export class WorkerService implements OnModuleDestroy {
       let result: { success: boolean; externalMessageId?: string; error?: string };
 
       if (platform === 'telegram') {
-        result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId);
+        result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId, msg.object_key);
       } else {
         // Fallback to TG-Adapter for legacy
         result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
@@ -207,7 +209,8 @@ export class WorkerService implements OnModuleDestroy {
   private async sendViaTelegram(
     channelId: string,
     text: string,
-    telegramPeerId?: string | null
+    telegramPeerId?: string | null,
+    objectKey?: string | null
   ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
     try {
       // Extract chat ID from channel_id format: "telegram:12345"
@@ -216,11 +219,21 @@ export class WorkerService implements OnModuleDestroy {
         return { success: false, error: 'Invalid channel_id format' };
       }
 
-      const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
-      return {
-        success: true,
-        externalMessageId: String(result.id),
-      };
+      // Если есть вложение, отправляем с файлом
+      if (objectKey) {
+        const result = await this.telegramService.sendMessageWithFile(chatId, text, objectKey, telegramPeerId);
+        return {
+          success: true,
+          externalMessageId: String(result.id),
+        };
+      } else {
+        // Обычная текстовая отправка
+        const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
+        return {
+          success: true,
+          externalMessageId: String(result.id),
+        };
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -321,6 +334,10 @@ export class WorkerService implements OnModuleDestroy {
     }
   }
 }
+
+
+
+
 
 
 

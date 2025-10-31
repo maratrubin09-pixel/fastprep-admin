@@ -7,7 +7,9 @@ import bigInt from 'big-integer';
 import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { Gauge, register } from 'prom-client';
+import { S3Service } from '../../storage/s3.service';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -18,7 +20,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // Prometheus метрика для статуса подключения
   private readonly connectionStatus: Gauge<string>;
 
-  constructor() {
+  constructor(
+    private s3Service: S3Service
+  ) {
     this.connectionStatus = new Gauge({
       name: 'telegram_connection_status',
       help: 'Telegram connection status (1=OK, 0=Down)',
@@ -415,6 +419,62 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async resolveEntity(chatId: string | number, telegramPeerId?: string | null): Promise<any> {
+    if (!this.client || !this.isReady) {
+      throw new Error('Telegram client not ready');
+    }
+
+    let entity;
+    
+    // Если есть сохраненный InputPeer, используем его (самый надежный способ)
+    if (telegramPeerId) {
+      try {
+        const parsed = JSON.parse(telegramPeerId);
+        this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
+        
+        // Воссоздаем InputPeer из сохраненных данных
+        if (parsed._ === 'InputPeerUser') {
+          entity = new Api.InputPeerUser({
+            userId: bigInt(parsed.userId),
+            accessHash: bigInt(parsed.accessHash || '0'),
+          });
+        } else if (parsed._ === 'InputPeerChat') {
+          entity = new Api.InputPeerChat({
+            chatId: bigInt(parsed.chatId),
+          });
+        } else if (parsed._ === 'InputPeerChannel') {
+          entity = new Api.InputPeerChannel({
+            channelId: bigInt(parsed.channelId),
+            accessHash: bigInt(parsed.accessHash || '0'),
+          });
+        } else {
+          throw new Error(`Unknown InputPeer type: ${parsed._}`);
+        }
+        
+        this.logger.log(`✅ Reconstructed InputPeer successfully`);
+      } catch (error) {
+        this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
+        entity = await this.client.getEntity(chatId);
+      }
+    } else {
+      // Fallback: пытаемся получить entity напрямую
+      this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
+      try {
+        entity = await this.client.getEntity(chatId);
+        this.logger.log(`✅ Successfully got entity via getEntity`);
+      } catch (getEntityError: any) {
+        this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
+        throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+      }
+    }
+    
+    if (!entity) {
+      throw new Error('Failed to resolve entity for sending message');
+    }
+
+    return entity;
+  }
+
   async sendMessage(chatId: string | number, text: string, telegramPeerId?: string | null): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');
@@ -422,62 +482,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     try {
       this.logger.log(`📤 Sending message to chat ${chatId}`);
-
-      let entity;
       
-      // Если есть сохраненный InputPeer, используем его (самый надежный способ)
-      if (telegramPeerId) {
-        try {
-          const parsed = JSON.parse(telegramPeerId);
-          this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
-          
-          // Воссоздаем InputPeer из сохраненных данных
-          if (parsed._ === 'InputPeerUser') {
-            entity = new Api.InputPeerUser({
-              userId: bigInt(parsed.userId),
-              accessHash: bigInt(parsed.accessHash || '0'),
-            });
-          } else if (parsed._ === 'InputPeerChat') {
-            entity = new Api.InputPeerChat({
-              chatId: bigInt(parsed.chatId),
-            });
-          } else if (parsed._ === 'InputPeerChannel') {
-            entity = new Api.InputPeerChannel({
-              channelId: bigInt(parsed.channelId),
-              accessHash: bigInt(parsed.accessHash || '0'),
-            });
-          } else {
-            throw new Error(`Unknown InputPeer type: ${parsed._}`);
-          }
-          
-          this.logger.log(`✅ Reconstructed InputPeer successfully`);
-        } catch (error) {
-          this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
-          entity = await this.client.getEntity(chatId);
-        }
-      } else {
-        // Fallback: пытаемся получить entity напрямую
-        this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
-        try {
-          entity = await this.client.getEntity(chatId);
-          this.logger.log(`✅ Successfully got entity via getEntity`);
-          
-          // Если получили entity, попробуем сохранить InputPeer для будущего использования
-          // (опционально, можно передать обратно в БД)
-          if (entity && (entity as any).className === 'User') {
-            const userId = (entity as any).id;
-            const accessHash = (entity as any).accessHash;
-            this.logger.log(`💡 Entity info: userId=${userId}, accessHash=${accessHash}`);
-          }
-        } catch (getEntityError: any) {
-          this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
-          throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
-        }
-      }
-      
-      if (!entity) {
-        throw new Error('Failed to resolve entity for sending message');
-      }
+      const entity = await this.resolveEntity(chatId, telegramPeerId);
       
       const result = await this.client.sendMessage(entity, {
         message: text,
@@ -489,6 +495,80 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`❌ Failed to send message to ${chatId}:`, error);
       this.logger.error(`Error details: ${error.message || JSON.stringify(error)}`);
       throw error;
+    }
+  }
+
+  async sendMessageWithFile(
+    chatId: string | number,
+    text: string,
+    objectKey: string,
+    telegramPeerId?: string | null
+  ): Promise<any> {
+    if (!this.client || !this.isReady) {
+      throw new Error('Telegram client not ready');
+    }
+
+    let tempFilePath: string | null = null;
+
+    try {
+      this.logger.log(`📤 Sending message with file to chat ${chatId}, objectKey: ${objectKey}`);
+      
+      const entity = await this.resolveEntity(chatId, telegramPeerId);
+
+      // Скачиваем файл из S3 во временную директорию
+      const fileData = await this.s3Service.getObject(objectKey);
+      const buffer = fileData.body;
+      
+      // Получаем MIME тип из метаданных S3 или из ответа getObject
+      const contentType = fileData.contentType || 'application/octet-stream';
+      this.logger.log(`📎 File type: ${contentType}`);
+
+      // Создаем временный файл
+      const tempDir = os.tmpdir();
+      const fileName = path.basename(objectKey);
+      tempFilePath = path.join(tempDir, `tg-${Date.now()}-${fileName}`);
+      
+      // Сохраняем файл
+      fs.writeFileSync(tempFilePath, buffer);
+
+      this.logger.log(`📥 File downloaded to: ${tempFilePath}`);
+
+      // Определяем тип отправки по MIME типу
+      let fileOptions: any = {
+        file: tempFilePath,
+      };
+
+      // Добавляем текст как подпись, если есть
+      if (text && text.trim()) {
+        fileOptions.caption = text;
+      }
+
+      // Для фото используем специальный формат
+      if (contentType.startsWith('image/')) {
+        fileOptions.forceDocument = false; // Отправляем как фото
+      } else {
+        fileOptions.forceDocument = true; // Отправляем как документ
+      }
+
+      // Отправляем через Telethon
+      const result = await this.client.sendFile(entity, fileOptions);
+
+      this.logger.log(`✅ Message with file sent successfully: ${result.id}`);
+      return result;
+    } catch (error: any) {
+      this.logger.error(`❌ Failed to send message with file to ${chatId}:`, error);
+      this.logger.error(`Error details: ${error.message || JSON.stringify(error)}`);
+      throw error;
+    } finally {
+      // Удаляем временный файл
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try {
+          fs.unlinkSync(tempFilePath);
+          this.logger.log(`🗑️ Temporary file deleted: ${tempFilePath}`);
+        } catch (cleanupError) {
+          this.logger.warn(`⚠️ Failed to delete temporary file: ${cleanupError}`);
+        }
+      }
     }
   }
 
@@ -560,6 +640,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
+
+
+
 
 
 
