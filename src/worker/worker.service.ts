@@ -138,6 +138,8 @@ export class WorkerService implements OnModuleDestroy {
       const channelId = convRes.rows[0]?.channel_id || '';
       const telegramPeerId = convRes.rows[0]?.telegram_peer_id || null;
       const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
+      
+      console.log(`📤 Processing outbox ${row.id}: platform=${platform}, channelId=${channelId}, hasTelegramPeerId=${!!telegramPeerId}`);
 
       // Вызов соответствующего сервиса
       const start = Date.now();
@@ -155,6 +157,7 @@ export class WorkerService implements OnModuleDestroy {
 
       if (result.success) {
         // Успех: outbox='done', messages.delivery_status='sent'
+        console.log(`✅ Message sent successfully: outbox=${row.id}, externalId=${result.externalMessageId}`);
         await client.query('BEGIN');
         await client.query(
           `UPDATE outbox SET status = 'done', updated_at = NOW() WHERE id = $1`,
@@ -172,12 +175,15 @@ export class WorkerService implements OnModuleDestroy {
       } else {
         // Ошибка: retry или failed
         const errorMsg = result.error || 'Unknown error';
+        console.error(`❌ Failed to send message: outbox=${row.id}, attempts=${row.attempts}, error=${errorMsg}`);
         if (row.attempts >= MAX_ATTEMPTS) {
           await this.markFailed(client, row.id, errorMsg);
           this.metrics.outboxProcessedTotal.inc({ status: 'failed' });
+          console.error(`❌ Outbox ${row.id} marked as FAILED after ${row.attempts} attempts`);
         } else {
           await this.markRetry(client, row.id, row.attempts, errorMsg);
           this.metrics.outboxProcessedTotal.inc({ status: 'retry' });
+          console.log(`🔄 Outbox ${row.id} will retry (attempt ${row.attempts + 1}/${MAX_ATTEMPTS})`);
         }
       }
     } catch (err: any) {

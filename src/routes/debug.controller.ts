@@ -10,7 +10,7 @@ export class DebugController {
   @Public()
   @Get('outbox-status')
   async getOutboxStatus() {
-    const result = await this.pool.query(`
+    const pending = await this.pool.query(`
       SELECT
         o.id,
         o.message_id,
@@ -31,17 +31,41 @@ export class DebugController {
       LIMIT 10
     `);
 
+    const failed = await this.pool.query(`
+      SELECT
+        o.id,
+        o.message_id,
+        o.status,
+        o.attempts,
+        o.last_error,
+        o.created_at,
+        o.updated_at,
+        LEFT(m.text, 30) as text_preview,
+        c.channel_id,
+        c.telegram_peer_id IS NOT NULL as has_telegram_peer,
+        c.telegram_peer_id
+      FROM outbox o
+      JOIN messages m ON o.message_id = m.id
+      JOIN conversations c ON m.conversation_id = c.id
+      WHERE o.status = 'failed'
+      ORDER BY o.updated_at DESC
+      LIMIT 10
+    `);
+
     const stats = await this.pool.query(`
       SELECT
-        COUNT(*) as total_pending,
-        COUNT(CASE WHEN o.scheduled_at <= NOW() THEN 1 END) as ready_to_process
-      FROM outbox o
-      WHERE o.status = 'pending'
+        COUNT(*) FILTER (WHERE status = 'pending') as total_pending,
+        COUNT(*) FILTER (WHERE status = 'failed') as total_failed,
+        COUNT(*) FILTER (WHERE status = 'done') as total_done,
+        COUNT(*) FILTER (WHERE status = 'processing') as total_processing,
+        COUNT(CASE WHEN status = 'pending' AND scheduled_at <= NOW() THEN 1 END) as ready_to_process
+      FROM outbox
     `);
 
     return {
       stats: stats.rows[0],
-      pending_jobs: result.rows,
+      pending_jobs: pending.rows,
+      failed_jobs: failed.rows,
     };
   }
 }
