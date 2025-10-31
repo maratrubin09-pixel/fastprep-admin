@@ -94,15 +94,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // Save session
         const session = this.client.session.save() as unknown as string;
         fs.writeFileSync(sessionFile, session, 'utf8');
+
+        // Listen for new messages (только если авторизован!)
+        this.client.addEventHandler(this.handleNewMessage.bind(this), new NewMessage({}));
+        this.logger.log('👂 Event handler registered for incoming messages');
       } else {
         this.isReady = false;
         this.connectionStatus.set(0); // Установить статус: не подключено
         this.logger.warn(`⚠️ Telegram not authenticated.`);
         this.logger.warn('Run: npm run start:tg-login in Render Shell to authenticate');
       }
-
-      // Listen for new messages
-      this.client.addEventHandler(this.handleNewMessage.bind(this), new NewMessage({}));
 
     } catch (error) {
       this.logger.error('❌ Failed to initialize Telegram client:', error);
@@ -113,6 +114,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleNewMessage(event: any) {
     try {
       if (!event.message) {
+        this.logger.debug('⚠️ Event without message, skipping');
         return;
       }
 
@@ -120,12 +122,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       // Skip outgoing messages
       if (message.out) {
+        this.logger.debug('📤 Skipping outgoing message');
         return;
       }
 
+      this.logger.log(`📨 New incoming message received from chat ${message.chatId}`);
       await this.processIncomingMessage(message);
     } catch (error) {
-      this.logger.error('Error handling new message:', error);
+      this.logger.error('❌ Error handling new message:', error);
     }
   }
 
