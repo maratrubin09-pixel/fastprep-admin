@@ -139,6 +139,10 @@ export class InboxService {
     chat_type?: string;
     participant_count?: number;
     telegram_peer_id?: string;
+    sender_phone?: string;
+    sender_username?: string;
+    sender_first_name?: string;
+    sender_last_name?: string;
   }): Promise<any> {
     const client = await this.pool.connect();
     try {
@@ -149,17 +153,51 @@ export class InboxService {
       );
 
       if (existingThread.rows.length > 0) {
-        // Update chat info if provided
-        if (params.chat_title || params.chat_type || params.participant_count || params.telegram_peer_id) {
+        // Update chat info if provided (обновляем только если новое значение не null)
+        const updates: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+
+        if (params.chat_title !== undefined) {
+          updates.push(`chat_title = COALESCE($${paramIndex++}, chat_title)`);
+          values.push(params.chat_title);
+        }
+        if (params.chat_type !== undefined) {
+          updates.push(`chat_type = COALESCE($${paramIndex++}, chat_type)`);
+          values.push(params.chat_type);
+        }
+        if (params.participant_count !== undefined) {
+          updates.push(`participant_count = COALESCE($${paramIndex++}, participant_count)`);
+          values.push(params.participant_count);
+        }
+        if (params.telegram_peer_id !== undefined) {
+          updates.push(`telegram_peer_id = COALESCE($${paramIndex++}, telegram_peer_id)`);
+          values.push(params.telegram_peer_id);
+        }
+        if (params.sender_phone !== undefined) {
+          updates.push(`sender_phone = COALESCE($${paramIndex++}, sender_phone)`);
+          values.push(params.sender_phone);
+        }
+        if (params.sender_username !== undefined) {
+          updates.push(`sender_username = COALESCE($${paramIndex++}, sender_username)`);
+          values.push(params.sender_username);
+        }
+        if (params.sender_first_name !== undefined) {
+          updates.push(`sender_first_name = COALESCE($${paramIndex++}, sender_first_name)`);
+          values.push(params.sender_first_name);
+        }
+        if (params.sender_last_name !== undefined) {
+          updates.push(`sender_last_name = COALESCE($${paramIndex++}, sender_last_name)`);
+          values.push(params.sender_last_name);
+        }
+
+        if (updates.length > 0) {
+          values.push(existingThread.rows[0].id);
           await client.query(
             `UPDATE conversations 
-             SET chat_title = COALESCE($1, chat_title),
-                 chat_type = COALESCE($2, chat_type),
-                 participant_count = COALESCE($3, participant_count),
-                 telegram_peer_id = COALESCE($4, telegram_peer_id),
-                 updated_at = NOW()
-             WHERE id = $5`,
-            [params.chat_title, params.chat_type, params.participant_count, params.telegram_peer_id, existingThread.rows[0].id]
+             SET ${updates.join(', ')}, updated_at = NOW()
+             WHERE id = $${paramIndex}`,
+            values
           );
           // Fetch updated thread
           const updated = await client.query(
@@ -173,8 +211,8 @@ export class InboxService {
 
       // Create new thread with chat info
       const result = await client.query(
-        `INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, telegram_peer_id, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'open', NOW(), NOW())
+        `INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, telegram_peer_id, sender_phone, sender_username, sender_first_name, sender_last_name, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', NOW(), NOW())
          RETURNING *`,
         [
           params.channel_id,
@@ -182,7 +220,11 @@ export class InboxService {
           params.chat_title || null,
           params.chat_type || null,
           params.participant_count || null,
-          params.telegram_peer_id || null
+          params.telegram_peer_id || null,
+          params.sender_phone || null,
+          params.sender_username || null,
+          params.sender_first_name || null,
+          params.sender_last_name || null
         ]
       );
 

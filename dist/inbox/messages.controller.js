@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MessagesController = void 0;
 const common_1 = require("@nestjs/common");
+const class_validator_1 = require("class-validator");
 const s3_service_1 = require("../storage/s3.service");
 const inbox_service_1 = require("./inbox.service");
 const pep_guard_1 = require("../authz/pep.guard");
@@ -23,6 +24,15 @@ class SendMessageDto {
     text;
     objectKey;
 }
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SendMessageDto.prototype, "text", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], SendMessageDto.prototype, "objectKey", void 0);
 let MessagesController = class MessagesController {
     s3;
     inbox;
@@ -31,11 +41,36 @@ let MessagesController = class MessagesController {
         this.inbox = inbox;
     }
     /**
-     * POST /api/inbox/threads/:id/messages
+     * GET /api/inbox/conversations
+     * Get all conversations for the current user
+     */
+    async getConversations(req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        return await this.inbox.getAllConversations();
+    }
+    /**
+     * GET /api/inbox/conversations/:id/messages
+     * Get all messages for a conversation
+     */
+    async getMessages(threadId, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        return await this.inbox.getMessages(threadId);
+    }
+    /**
+     * POST /api/inbox/conversations/:id/messages
      * Валидация objectKey (HEAD: существует, допустимый MIME/размер, префикс inbox/{threadId}/)
      * Транзакция: messages (out, delivery_status='queued') → outbox (pending) → audit_logs
+     * Возвращает 201 с полными данными сообщения для немедленного отображения в UI
      */
     async sendMessage(threadId, dto, req) {
+        console.log('🔍 DEBUG sendMessage - dto:', JSON.stringify(dto));
+        console.log('🔍 DEBUG sendMessage - dto.text:', dto.text, 'type:', typeof dto.text);
         const userId = req.user?.id;
         if (!userId) {
             throw new common_1.BadRequestException('User not authenticated');
@@ -57,14 +92,34 @@ let MessagesController = class MessagesController {
                 throw new common_1.BadRequestException({ code: 'SIZE_EXCEEDED', message: 'Attachment size exceeds limit' });
             }
         }
-        // Создание сообщения + outbox + audit
-        const messageId = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
-        return { status: 'queued', messageId };
+        // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
+        const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
+        // Возвращаем 201 Created с полными данными сообщения
+        return message;
     }
 };
 exports.MessagesController = MessagesController;
 __decorate([
-    (0, common_1.Post)(':id/messages'),
+    (0, common_1.Get)('conversations'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "getConversations", null);
+__decorate([
+    (0, common_1.Get)('conversations/:id/messages'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "getMessages", null);
+__decorate([
+    (0, common_1.Post)('conversations/:id/messages'),
     (0, common_1.UseGuards)(pep_guard_1.PepGuard),
     (0, pep_guard_1.RequirePerm)('inbox.send_message'),
     __param(0, (0, common_1.Param)('id')),
@@ -75,7 +130,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], MessagesController.prototype, "sendMessage", null);
 exports.MessagesController = MessagesController = __decorate([
-    (0, common_1.Controller)('inbox/threads'),
+    (0, common_1.Controller)('inbox'),
     __metadata("design:paramtypes", [s3_service_1.S3Service,
         inbox_service_1.InboxService])
 ], MessagesController);

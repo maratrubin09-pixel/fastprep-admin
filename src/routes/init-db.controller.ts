@@ -34,6 +34,20 @@ export class InitDbController {
       await this.pool.query(`
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS telegram_peer_id TEXT;
       `);
+      
+      // Добавить колонки для контактных данных (номер телефона, имя, username)
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_phone VARCHAR(50);
+      `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_username VARCHAR(255);
+      `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_first_name VARCHAR(255);
+      `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_last_name VARCHAR(255);
+      `);
 
       // Добавить колонки в messages (если нужны)
       await this.pool.query(`

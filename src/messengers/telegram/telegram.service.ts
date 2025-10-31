@@ -149,21 +149,42 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // Get chat info
       let chatTitle = 'Unknown';
       let senderName = 'Unknown';
+      let senderPhone = null;
+      let senderUsername = null;
+      let senderFirstName = null;
+      let senderLastName = null;
 
       if (this.client) {
         try {
           const entity = await this.client.getEntity(chatId);
           chatTitle = (entity as any).title || (entity as any).firstName || 'Unknown';
+          
+          // Если это личный чат (User), сохраняем информацию о пользователе
+          if ((entity as any).className === 'User') {
+            senderFirstName = (entity as any).firstName || null;
+            senderLastName = (entity as any).lastName || null;
+            senderUsername = (entity as any).username || null;
+            senderPhone = (entity as any).phone || null;
+            senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || 'Unknown';
+            chatTitle = senderName; // Для личных чатов используем имя отправителя
+          }
         } catch (error) {
           this.logger.warn(`Could not fetch chat info for ${chatId}`);
         }
 
-        if (senderId) {
+        // Если senderId есть, но не получили информацию из chat entity, попробуем получить отдельно
+        if (senderId && senderName === 'Unknown') {
           try {
             const sender = await this.client.getEntity(senderId);
-            senderName = `${(sender as any).firstName} ${(sender as any).lastName || ''}`.trim();
+            senderFirstName = (sender as any).firstName || null;
+            senderLastName = (sender as any).lastName || null;
+            senderUsername = (sender as any).username || null;
+            senderPhone = (sender as any).phone || null;
+            senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || 'Unknown';
+            
+            this.logger.log(`✅ Extracted sender info: ${senderName} (@${senderUsername || 'N/A'}, ${senderPhone || 'N/A'})`);
           } catch (error) {
-            this.logger.warn(`Could not fetch sender info for ${senderId}`);
+            this.logger.warn(`Could not fetch sender info for ${senderId}: ${error}`);
           }
         }
       }
@@ -195,6 +216,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         messageId: String(messageId),
         senderId: senderId ? String(senderId) : null,
         senderName,
+        senderPhone,
+        senderUsername,
+        senderFirstName,
+        senderLastName,
         chatTitle,
         text,
         attachments,
@@ -279,17 +304,36 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       } else {
         // Fallback: пытаемся получить entity напрямую
         this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
-        entity = await this.client.getEntity(chatId);
+        try {
+          entity = await this.client.getEntity(chatId);
+          this.logger.log(`✅ Successfully got entity via getEntity`);
+          
+          // Если получили entity, попробуем сохранить InputPeer для будущего использования
+          // (опционально, можно передать обратно в БД)
+          if (entity && (entity as any).className === 'User') {
+            const userId = (entity as any).id;
+            const accessHash = (entity as any).accessHash;
+            this.logger.log(`💡 Entity info: userId=${userId}, accessHash=${accessHash}`);
+          }
+        } catch (getEntityError: any) {
+          this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
+          throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+        }
+      }
+      
+      if (!entity) {
+        throw new Error('Failed to resolve entity for sending message');
       }
       
       const result = await this.client.sendMessage(entity, {
         message: text,
       });
 
-      this.logger.log(`✅ Message sent: ${result.id}`);
+      this.logger.log(`✅ Message sent successfully: ${result.id}`);
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`❌ Failed to send message to ${chatId}:`, error);
+      this.logger.error(`Error details: ${error.message || JSON.stringify(error)}`);
       throw error;
     }
   }

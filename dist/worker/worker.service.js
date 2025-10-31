@@ -11,6 +11,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkerService = void 0;
 const common_1 = require("@nestjs/common");
@@ -18,6 +21,8 @@ const pg_1 = require("pg");
 const db_module_1 = require("../db/db.module");
 const metrics_service_1 = require("./metrics.service");
 const alerts_service_1 = require("./alerts.service");
+const telegram_service_1 = require("../messengers/telegram/telegram.service");
+const axios_1 = __importDefault(require("axios"));
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
 const BASE_BACKOFF_MS = Number(process.env.OUTBOX_BASE_BACKOFF_MS || 1000);
 const MAX_BACKOFF_MS = Number(process.env.OUTBOX_MAX_BACKOFF_MS || 60000);
@@ -27,12 +32,14 @@ let WorkerService = class WorkerService {
     pool;
     metrics;
     alerts;
+    telegramService;
     running = false;
     timer;
-    constructor(pool, metrics, alerts) {
+    constructor(pool, metrics, alerts, telegramService) {
         this.pool = pool;
         this.metrics = metrics;
         this.alerts = alerts;
+        this.telegramService = telegramService;
     }
     async start() {
         this.running = true;
@@ -55,7 +62,7 @@ let WorkerService = class WorkerService {
             catch (err) {
                 console.error('Worker loop error:', err);
             }
-            // Задержка 1 секунда
+            // Задержка 1 секунда (оптимизировано с 5 сек)
             await new Promise((resolve) => {
                 this.timer = setTimeout(resolve, 1000);
             });
@@ -63,6 +70,7 @@ let WorkerService = class WorkerService {
     }
     async processBatch() {
         const rows = await this.leaseBatch();
+        console.log(`🔍 leaseBatch() returned ${rows.length} rows`);
         if (rows.length === 0)
             return;
         // Параллельная обработка (CONCURRENCY)
@@ -78,6 +86,15 @@ let WorkerService = class WorkerService {
      * Lease пачки через CTE + FOR UPDATE SKIP LOCKED
      */
     async leaseBatch() {
+        // Debug: проверим, сколько pending записей есть вообще
+        const debugRes = await this.pool.query(`
+      SELECT COUNT(*) as count, 
+             COUNT(*) FILTER (WHERE scheduled_at <= NOW()) as ready_count,
+             COUNT(*) FILTER (WHERE scheduled_at > NOW()) as future_count
+      FROM outbox 
+      WHERE status = 'pending'
+    `);
+        console.log(`📊 Pending outbox stats:`, debugRes.rows[0]);
         const sql = `
       WITH batch AS (
         SELECT id
@@ -111,9 +128,21 @@ let WorkerService = class WorkerService {
                 return;
             }
             const msg = msgRes.rows[0];
-            // Вызов TG-Adapter
+            // Определяем платформу из channel_id и получаем telegram_peer_id
+            const convRes = await client.query(`SELECT channel_id, telegram_peer_id FROM conversations WHERE id = $1`, [msg.conversation_id]);
+            const channelId = convRes.rows[0]?.channel_id || '';
+            const telegramPeerId = convRes.rows[0]?.telegram_peer_id || null;
+            const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
+            // Вызов соответствующего сервиса
             const start = Date.now();
-            const result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
+            let result;
+            if (platform === 'telegram') {
+                result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId);
+            }
+            else {
+                // Fallback to TG-Adapter for legacy
+                result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);
+            }
             const duration = (Date.now() - start) / 1000;
             this.metrics.adapterLatencySeconds.observe(duration);
             if (result.success) {
@@ -123,6 +152,8 @@ let WorkerService = class WorkerService {
                 await client.query(`UPDATE messages SET delivery_status = 'sent', external_message_id = $1, updated_at = NOW() WHERE id = $2`, [result.externalMessageId, row.message_id]);
                 await client.query('COMMIT');
                 this.metrics.outboxProcessedTotal.inc({ status: 'done' });
+                // Уведомляем API об обновлении статуса через WebSocket
+                await this.notifyMessageStatusUpdate(msg.conversation_id, row.message_id, 'sent');
             }
             else {
                 // Ошибка: retry или failed
@@ -151,6 +182,29 @@ let WorkerService = class WorkerService {
         }
         finally {
             client.release();
+        }
+    }
+    /**
+     * Send via Telegram TDLib
+     */
+    async sendViaTelegram(channelId, text, telegramPeerId) {
+        try {
+            // Extract chat ID from channel_id format: "telegram:12345"
+            const chatId = channelId.split(':')[1];
+            if (!chatId) {
+                return { success: false, error: 'Invalid channel_id format' };
+            }
+            const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
+            return {
+                success: true,
+                externalMessageId: String(result.id),
+            };
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error.message || 'Telegram send failed',
+            };
         }
     }
     /**
@@ -196,6 +250,32 @@ let WorkerService = class WorkerService {
         const scheduledAt = new Date(Date.now() + backoff);
         await client.query(`UPDATE outbox SET status = 'pending', scheduled_at = $1, last_error = $2, updated_at = NOW() WHERE id = $3`, [scheduledAt, error, outboxId]);
     }
+    /**
+     * Уведомление API об обновлении статуса сообщения (для WebSocket broadcast)
+     */
+    async notifyMessageStatusUpdate(conversationId, messageId, status) {
+        try {
+            const backendUrl = process.env.BACKEND_URL;
+            const serviceJwt = process.env.SERVICE_JWT;
+            if (!backendUrl || !serviceJwt) {
+                console.warn('⚠️ BACKEND_URL or SERVICE_JWT not set, skipping status update notification');
+                return;
+            }
+            await axios_1.default.post(`${backendUrl}/api/inbox/events/message-status`, {
+                conversationId,
+                messageId,
+                status,
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${serviceJwt}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
+        catch (error) {
+            console.error('Failed to notify message status update:', error.message);
+        }
+    }
 };
 exports.WorkerService = WorkerService;
 exports.WorkerService = WorkerService = __decorate([
@@ -203,6 +283,7 @@ exports.WorkerService = WorkerService = __decorate([
     __param(0, (0, common_1.Inject)(db_module_1.PG_POOL)),
     __metadata("design:paramtypes", [pg_1.Pool,
         metrics_service_1.MetricsService,
-        alerts_service_1.AlertsService])
+        alerts_service_1.AlertsService,
+        telegram_service_1.TelegramService])
 ], WorkerService);
 //# sourceMappingURL=worker.service.js.map

@@ -15,6 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_service_1 = require("./auth.service");
+const jwt_guard_1 = require("./jwt.guard");
+const public_decorator_1 = require("./public.decorator");
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
@@ -29,26 +31,20 @@ let AuthController = class AuthController {
             throw new common_1.HttpException({ message: err.message || 'Login failed' }, common_1.HttpStatus.UNAUTHORIZED);
         }
     }
-    async getMe(authHeader) {
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new common_1.HttpException('Unauthorized', common_1.HttpStatus.UNAUTHORIZED);
-        }
-        const token = authHeader.substring(7);
+    async getMe(req) {
+        // req.user установлен JwtStrategy
         try {
-            const user = await this.authService.getMe(token);
+            const user = await this.authService.getMe(req.user.id);
             return user;
         }
         catch (err) {
-            throw new common_1.HttpException({ message: err.message || 'Invalid token' }, common_1.HttpStatus.UNAUTHORIZED);
+            throw new common_1.HttpException({ message: err.message || 'User not found' }, common_1.HttpStatus.UNAUTHORIZED);
         }
     }
-    async updateProfile(authHeader, body) {
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new common_1.HttpException('Unauthorized', common_1.HttpStatus.UNAUTHORIZED);
-        }
-        const token = authHeader.substring(7);
+    async updateProfile(req, body) {
+        // req.user установлен JwtStrategy
         try {
-            const user = await this.authService.updateProfile(token, body);
+            const user = await this.authService.updateProfile(req.user.id, body);
             return user;
         }
         catch (err) {
@@ -58,6 +54,8 @@ let AuthController = class AuthController {
 };
 exports.AuthController = AuthController;
 __decorate([
+    (0, public_decorator_1.Public)() // Этот endpoint доступен без JWT
+    ,
     (0, common_1.Post)('login'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -65,18 +63,20 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
 __decorate([
+    (0, common_1.UseGuards)(jwt_guard_1.JwtAuthGuard),
     (0, common_1.Get)('me'),
-    __param(0, (0, common_1.Headers)('authorization')),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "getMe", null);
 __decorate([
+    (0, common_1.UseGuards)(jwt_guard_1.JwtAuthGuard),
     (0, common_1.Put)('profile'),
-    __param(0, (0, common_1.Headers)('authorization')),
+    __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "updateProfile", null);
 exports.AuthController = AuthController = __decorate([

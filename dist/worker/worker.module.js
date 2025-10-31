@@ -12,12 +12,13 @@ const worker_service_1 = require("./worker.service");
 const metrics_service_1 = require("./metrics.service");
 const alerts_service_1 = require("./alerts.service");
 const db_module_1 = require("../db/db.module");
+const telegram_module_1 = require("../messengers/telegram/telegram.module");
 let WorkerModule = class WorkerModule {
 };
 exports.WorkerModule = WorkerModule;
 exports.WorkerModule = WorkerModule = __decorate([
     (0, common_1.Module)({
-        imports: [db_module_1.DbModule],
+        imports: [db_module_1.DbModule, telegram_module_1.TelegramModule],
         providers: [worker_service_1.WorkerService, metrics_service_1.MetricsService, alerts_service_1.AlertsService],
     })
 ], WorkerModule);

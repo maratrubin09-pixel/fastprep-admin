@@ -12,6 +12,7 @@ const storage_module_1 = require("../storage/storage.module");
 const authz_module_1 = require("../authz/authz.module");
 const uploads_controller_1 = require("./uploads.controller");
 const messages_controller_1 = require("./messages.controller");
+const telegram_events_controller_1 = require("./telegram-events.controller");
 const ws_gateway_1 = require("./ws.gateway");
 const inbox_service_1 = require("./inbox.service");
 let InboxModule = class InboxModule {
@@ -21,7 +22,8 @@ exports.InboxModule = InboxModule = __decorate([
     (0, common_1.Module)({
         imports: [storage_module_1.StorageModule, authz_module_1.AuthzModule],
         providers: [inbox_service_1.InboxService, ws_gateway_1.WsGateway],
-        controllers: [uploads_controller_1.UploadsController, messages_controller_1.MessagesController],
+        controllers: [uploads_controller_1.UploadsController, messages_controller_1.MessagesController, telegram_events_controller_1.TelegramEventsController],
+        exports: [inbox_service_1.InboxService],
     })
 ], InboxModule);
 //# sourceMappingURL=inbox.module.js.map

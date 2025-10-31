@@ -46,6 +46,10 @@ class TelegramEventDto {
   messageId!: string;
   senderId?: string | null;
   senderName!: string;
+  senderPhone?: string | null;
+  senderUsername?: string | null;
+  senderFirstName?: string | null;
+  senderLastName?: string | null;
   chatTitle!: string;
   text!: string;
   attachments?: any[];
@@ -78,6 +82,10 @@ export class TelegramEventsController {
         chat_title: event.chatTitle,
         chat_type: event.chatType || 'private',
         telegram_peer_id: event.telegramPeerId,
+        sender_phone: event.senderPhone,
+        sender_username: event.senderUsername,
+        sender_first_name: event.senderFirstName,
+        sender_last_name: event.senderLastName,
       });
 
       // Save incoming message
