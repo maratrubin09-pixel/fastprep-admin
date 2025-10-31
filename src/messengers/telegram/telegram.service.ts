@@ -195,23 +195,75 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       // Сериализуем InputPeer для последующего использования при отправке
       // Берем accessHash напрямую из message._sender (доступен для входящих сообщений)
+      // Если не получилось, пытаемся получить entity напрямую
       let peerIdData = null;
+      
+      // Способ 1: Попробуем из message._sender (быстрее)
       try {
         const sender = message._sender;
-        if (sender && sender.id) {
+        if (sender && sender.id && sender.accessHash) {
           const serialized: any = {
             _: 'InputPeerUser',
             userId: String(sender.id),
-            accessHash: sender.accessHash ? String(sender.accessHash) : '0'
+            accessHash: String(sender.accessHash)
           };
           
           peerIdData = JSON.stringify(serialized);
           this.logger.log(`📦 Saved InputPeer from message._sender: ${peerIdData}`);
-        } else {
-          this.logger.warn(`⚠️ No _sender in message, cannot save InputPeer`);
         }
       } catch (error) {
-        this.logger.warn(`⚠️ Could not extract InputPeer from message: ${error}`);
+        this.logger.debug(`⚠️ Could not extract InputPeer from message._sender: ${error}`);
+      }
+      
+      // Способ 2: Если не получилось из _sender, получаем entity напрямую через getEntity
+      if (!peerIdData && this.client && chatId) {
+        try {
+          const entity = await this.client.getEntity(chatId);
+          
+          if ((entity as any).className === 'User') {
+            const userId = (entity as any).id;
+            const accessHash = (entity as any).accessHash;
+            
+            if (userId && accessHash) {
+              const serialized: any = {
+                _: 'InputPeerUser',
+                userId: String(userId),
+                accessHash: String(accessHash)
+              };
+              
+              peerIdData = JSON.stringify(serialized);
+              this.logger.log(`📦 Saved InputPeer from getEntity: ${peerIdData}`);
+            } else {
+              this.logger.warn(`⚠️ Entity from getEntity missing userId or accessHash`);
+            }
+          } else if ((entity as any).className === 'Chat') {
+            const chatId_ = (entity as any).id;
+            const serialized: any = {
+              _: 'InputPeerChat',
+              chatId: String(chatId_)
+            };
+            peerIdData = JSON.stringify(serialized);
+            this.logger.log(`📦 Saved InputPeerChat from getEntity: ${peerIdData}`);
+          } else if ((entity as any).className === 'Channel') {
+            const channelId = (entity as any).id;
+            const accessHash = (entity as any).accessHash;
+            if (channelId && accessHash) {
+              const serialized: any = {
+                _: 'InputPeerChannel',
+                channelId: String(channelId),
+                accessHash: String(accessHash)
+              };
+              peerIdData = JSON.stringify(serialized);
+              this.logger.log(`📦 Saved InputPeerChannel from getEntity: ${peerIdData}`);
+            }
+          }
+        } catch (error) {
+          this.logger.warn(`⚠️ Could not get entity via getEntity for ${chatId}: ${error}`);
+        }
+      }
+      
+      if (!peerIdData) {
+        this.logger.error(`❌ Could not save InputPeer for chat ${chatId} - messages to this chat will fail!`);
       }
 
       const payload = {
@@ -410,6 +462,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
+
 
 
 
