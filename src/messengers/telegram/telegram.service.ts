@@ -282,6 +282,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       
       if (!peerIdData) {
         this.logger.error(`❌ Could not save InputPeer for chat ${chatId} - messages to this chat will fail!`);
+        this.logger.error(`❌ Details: senderName=${senderName}, chatTitle=${chatTitle}, hasMessageSender=${!!message._sender}`);
+      } else {
+        this.logger.log(`✅ Successfully extracted telegramPeerId for chat ${chatId}`);
       }
 
       const payload = {
@@ -303,6 +306,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       };
 
       this.logger.log(`📨 Incoming Telegram message from ${senderName} in ${chatTitle}`);
+      this.logger.log(`📋 Payload summary: chatTitle="${chatTitle}", telegramPeerId=${peerIdData ? 'present' : 'null'}, senderUsername=${senderUsername || 'null'}, senderPhone=${senderPhone || 'null'}`);
       this.logger.debug(`📤 Payload text field: "${text}" (type: ${typeof text})`);
 
       // Send to backend API

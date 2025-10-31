@@ -208,7 +208,11 @@ export class InboxService {
 
         if (updates.length > 0) {
           values.push(existingThread.rows[0].id);
+          const currentData = existingThread.rows[0];
           console.log(`🔄 Updating conversation ${existingThread.rows[0].id}: ${updates.join(', ')}`);
+          console.log(`📊 Before update: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
+          console.log(`📊 Update values: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
+          
           await client.query(
             `UPDATE conversations 
              SET ${updates.join(', ')}, updated_at = NOW()
@@ -223,7 +227,10 @@ export class InboxService {
           console.log(`✅ Conversation updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
           return updated.rows[0];
         }
+        const currentData = existingThread.rows[0];
         console.log(`⏭️ No updates needed for conversation ${existingThread.rows[0].id}`);
+        console.log(`📊 Current data: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
+        console.log(`📊 Received params: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
         return existingThread.rows[0];
       }
 
