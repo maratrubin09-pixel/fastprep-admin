@@ -15,6 +15,7 @@ import {
   TextField,
   Button,
   Stack,
+  IconButton,
 } from '@mui/material';
 import {
   Telegram as TelegramIcon,
@@ -24,6 +25,7 @@ import {
   Send as SendIcon,
   Done as DoneIcon,
   DoneAll as DoneAllIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { io } from 'socket.io-client';
 import DashboardLayout from '../components/DashboardLayout';
@@ -259,6 +261,47 @@ const InboxPage = () => {
     return date.toLocaleDateString();
   };
 
+  const handleDeleteConversation = async (convId, e) => {
+    e.stopPropagation(); // Предотвращаем выбор чата при клике на кнопку
+    
+    if (!window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch(`${API_URL}/api/inbox/conversations/${convId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete conversation');
+      }
+
+      const result = await response.json();
+      
+      // Удаляем чат из списка
+      setConversations(prev => prev.filter(conv => conv.id !== convId));
+      
+      // Если удаленный чат был выбран, снимаем выбор
+      if (selectedThread?.id === convId) {
+        setSelectedThread(null);
+        setMessages([]);
+      }
+
+      alert(result.message || 'Conversation deleted successfully');
+    } catch (err) {
+      alert('Failed to delete conversation: ' + err.message);
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout title="Unified Inbox">
@@ -316,6 +359,22 @@ const InboxPage = () => {
                         backgroundColor: 'primary.light',
                       },
                     }}
+                    secondaryAction={
+                      <IconButton
+                        edge="end"
+                        aria-label="delete"
+                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                        sx={{ 
+                          color: 'error.main',
+                          '&:hover': {
+                            backgroundColor: 'error.light',
+                            color: 'error.dark',
+                          },
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    }
                   >
                     <ListItemAvatar>
                       <Avatar>
@@ -324,7 +383,7 @@ const InboxPage = () => {
                     </ListItemAvatar>
                     <ListItemText
                       primary={
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
                           <Typography variant="subtitle1" fontWeight="bold">
                             {conv.chat_title || conv.external_chat_id || 'Unknown'}
                           </Typography>

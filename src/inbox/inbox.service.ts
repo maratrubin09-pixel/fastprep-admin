@@ -333,6 +333,54 @@ export class InboxService {
     );
     return result.rows;
   }
+
+  /**
+   * Delete conversation and all related data
+   */
+  async deleteConversation(conversationId: string): Promise<{ success: boolean; message: string }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete outbox entries
+      await client.query(
+        `DELETE FROM outbox WHERE conversation_id = $1`,
+        [conversationId]
+      );
+
+      // Delete messages (CASCADE should handle this, but explicit is better)
+      await client.query(
+        `DELETE FROM messages WHERE conversation_id = $1`,
+        [conversationId]
+      );
+
+      // Delete conversation
+      const result = await client.query(
+        `DELETE FROM conversations WHERE id = $1 RETURNING id, channel_id`,
+        [conversationId]
+      );
+
+      // Remove from Redis unassigned set
+      await this.redis.srem('inbox:unassigned', conversationId);
+      await this.redis.del(`inbox:assignee:${conversationId}`);
+
+      await client.query('COMMIT');
+
+      if (result.rows.length === 0) {
+        return { success: false, message: 'Conversation not found' };
+      }
+
+      return { 
+        success: true, 
+        message: `Deleted conversation ${conversationId} (${result.rows[0].channel_id})` 
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 

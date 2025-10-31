@@ -211,24 +211,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // Способ 1: Попробуем из message._sender (быстрее)
       try {
         const sender = message._sender;
-        if (sender && sender.id && sender.accessHash) {
-          const serialized: any = {
-            _: 'InputPeerUser',
-            userId: String(sender.id),
-            accessHash: String(sender.accessHash)
-          };
-          
-          peerIdData = JSON.stringify(serialized);
-          this.logger.log(`📦 Saved InputPeer from message._sender: ${peerIdData}`);
+        this.logger.debug(`🔍 Checking message._sender: ${sender ? `id=${sender.id}, hasAccessHash=${!!sender.accessHash}` : 'null'}`);
+        
+        if (sender && sender.id) {
+          if (sender.accessHash) {
+            const serialized: any = {
+              _: 'InputPeerUser',
+              userId: String(sender.id),
+              accessHash: String(sender.accessHash)
+            };
+            
+            peerIdData = JSON.stringify(serialized);
+            this.logger.log(`✅ Saved InputPeer from message._sender: ${peerIdData}`);
+          } else {
+            this.logger.warn(`⚠️ message._sender exists but no accessHash for userId=${sender.id}`);
+          }
         }
       } catch (error) {
-        this.logger.debug(`⚠️ Could not extract InputPeer from message._sender: ${error}`);
+        this.logger.warn(`⚠️ Could not extract InputPeer from message._sender: ${error}`);
       }
       
       // Способ 2: Если не получилось из _sender, получаем entity напрямую через getEntity
       if (!peerIdData && this.client && chatId) {
+        this.logger.log(`🔍 Trying getEntity for chatId=${chatId} to get InputPeer`);
         try {
           const entity = await this.client.getEntity(chatId);
+          this.logger.debug(`✅ Got entity from getEntity: className=${(entity as any).className}, id=${(entity as any).id}, hasAccessHash=${!!(entity as any).accessHash}`);
           
           if ((entity as any).className === 'User') {
             const userId = (entity as any).id;

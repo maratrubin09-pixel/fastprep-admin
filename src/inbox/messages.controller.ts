@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
@@ -100,7 +100,24 @@ export class MessagesController {
     // Возвращаем 201 Created с полными данными сообщения
     return message;
   }
+
+  /**
+   * DELETE /api/inbox/conversations/:id
+   * Удалить чат (для ручного удаления "Unknown" чатов)
+   */
+  @Delete('conversations/:id')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async deleteConversation(@Param('id') threadId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    return await this.inbox.deleteConversation(threadId);
+  }
 }
+
 
 
 

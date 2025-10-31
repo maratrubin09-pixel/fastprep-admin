@@ -68,6 +68,33 @@ export class DebugController {
       failed_jobs: failed.rows,
     };
   }
+
+  @Public()
+  @Get('unknown-chats')
+  async getUnknownChats() {
+    // Возвращаем список чатов с chat_title = 'Unknown' и telegram_peer_id = null
+    const result = await this.pool.query(`
+      SELECT 
+        c.id,
+        c.channel_id,
+        c.chat_title,
+        c.telegram_peer_id,
+        c.created_at,
+        c.last_message_at,
+        COUNT(m.id) as message_count
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+      WHERE c.chat_title = 'Unknown' 
+        AND c.telegram_peer_id IS NULL
+      GROUP BY c.id
+      ORDER BY c.last_message_at DESC NULLS LAST
+    `);
+
+    return {
+      unknown_chats: result.rows,
+      count: result.rows.length
+    };
+  }
 }
 
 
