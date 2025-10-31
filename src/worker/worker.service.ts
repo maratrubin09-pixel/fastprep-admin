@@ -4,7 +4,6 @@ import { PG_POOL } from '../db/db.module';
 import { MetricsService } from './metrics.service';
 import { AlertsService } from './alerts.service';
 import { TelegramService } from '../messengers/telegram/telegram.service';
-import { S3Service } from '../storage/s3.service';
 import axios from 'axios';
 
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
@@ -28,8 +27,7 @@ export class WorkerService implements OnModuleDestroy {
     @Inject(PG_POOL) private pool: Pool,
     private metrics: MetricsService,
     private alerts: AlertsService,
-    private telegramService: TelegramService,
-    private s3Service: S3Service
+    private telegramService: TelegramService
   ) {}
 
   async start() {

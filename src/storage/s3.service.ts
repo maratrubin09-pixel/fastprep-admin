@@ -101,10 +101,21 @@ export class S3Service {
       throw new Error(`File not found in S3: ${key}`);
     }
 
+    // AWS SDK v3 возвращает Readable stream
     // Конвертируем stream в Buffer
     const chunks: Uint8Array[] = [];
     const stream = response.Body as any;
     
+    // Проверяем, есть ли метод transformToByteArray (для AWS SDK v3)
+    if (typeof stream.transformToByteArray === 'function') {
+      const buffer = await stream.transformToByteArray();
+      return {
+        body: Buffer.from(buffer),
+        contentType: response.ContentType,
+      };
+    }
+    
+    // Fallback для стандартного Node.js stream
     return new Promise((resolve, reject) => {
       stream.on('data', (chunk: Uint8Array) => chunks.push(chunk));
       stream.on('end', () => {
