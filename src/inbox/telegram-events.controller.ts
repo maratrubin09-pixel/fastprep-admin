@@ -72,20 +72,22 @@ export class TelegramEventsController {
   @UseGuards(ServiceJwtGuard)
   async handleTelegramEvent(@Body() event: any) {
     this.logger.log(`📨 Received Telegram event from chat ${event.chatId}`);
+    this.logger.log(`📋 Event data: chatTitle="${event.chatTitle}", telegramPeerId=${event.telegramPeerId ? 'present' : 'null'}, senderName="${event.senderName}"`);
 
     try {
       // Find or create conversation thread
+      // ВСЕГДА передаем все параметры, даже если null/undefined, чтобы обновить если есть
       const thread = await this.inboxService.findOrCreateThread({
         channel_id: `telegram:${event.chatId}`,
         external_chat_id: event.chatId,
         platform: 'telegram',
-        chat_title: event.chatTitle,
+        chat_title: event.chatTitle || null, // Явно передаем null если undefined
         chat_type: event.chatType || 'private',
-        telegram_peer_id: event.telegramPeerId,
-        sender_phone: event.senderPhone,
-        sender_username: event.senderUsername,
-        sender_first_name: event.senderFirstName,
-        sender_last_name: event.senderLastName,
+        telegram_peer_id: event.telegramPeerId || null, // Явно передаем null если undefined
+        sender_phone: event.senderPhone || null,
+        sender_username: event.senderUsername || null,
+        sender_first_name: event.senderFirstName || null,
+        sender_last_name: event.senderLastName || null,
       });
 
       // Save incoming message
@@ -105,6 +107,7 @@ export class TelegramEventsController {
       });
 
       this.logger.log(`✅ Message ${message.id} saved to thread ${thread.id}`);
+      this.logger.log(`📊 Thread updated: chat_title="${thread.chat_title}", telegram_peer_id=${thread.telegram_peer_id ? 'present' : 'null'}`);
 
       // Отправляем WebSocket событие всем подключенным клиентам
       try {

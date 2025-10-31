@@ -159,12 +159,15 @@ export class InboxService {
         let paramIndex = 1;
 
         if (params.chat_title !== undefined) {
-          // Обновляем chat_title, даже если он был "Unknown" - новое значение имеет приоритет
-          if (params.chat_title && params.chat_title !== 'Unknown') {
-            updates.push(`chat_title = $${paramIndex++}`);
-            values.push(params.chat_title);
-          } else if (params.chat_title === null) {
-            // Если передали null явно, обновляем
+          // Обновляем chat_title если:
+          // 1. Новое значение не null И не "Unknown" (всегда обновляем лучшее значение)
+          // 2. Старое было "Unknown", а новое что-то другое
+          const currentTitle = existingThread.rows[0].chat_title;
+          const shouldUpdate = 
+            (params.chat_title && params.chat_title !== 'Unknown') ||
+            (currentTitle === 'Unknown' && params.chat_title && params.chat_title !== 'Unknown');
+          
+          if (shouldUpdate || params.chat_title === null) {
             updates.push(`chat_title = $${paramIndex++}`);
             values.push(params.chat_title);
           }
@@ -177,30 +180,35 @@ export class InboxService {
           updates.push(`participant_count = COALESCE($${paramIndex++}, participant_count)`);
           values.push(params.participant_count);
         }
-        if (params.telegram_peer_id !== undefined && params.telegram_peer_id !== null) {
-          // telegram_peer_id имеет приоритет - если есть, всегда обновляем (даже если было null)
-          updates.push(`telegram_peer_id = $${paramIndex++}`);
-          values.push(params.telegram_peer_id);
+        if (params.telegram_peer_id !== undefined) {
+          // telegram_peer_id имеет приоритет - если есть (не null), всегда обновляем
+          // Если null, не обновляем (оставляем старое значение)
+          if (params.telegram_peer_id !== null) {
+            updates.push(`telegram_peer_id = $${paramIndex++}`);
+            values.push(params.telegram_peer_id);
+          }
         }
-        if (params.sender_phone !== undefined) {
-          updates.push(`sender_phone = COALESCE($${paramIndex++}, sender_phone)`);
+        // Для контактных данных - обновляем только если новое значение не null
+        if (params.sender_phone !== undefined && params.sender_phone !== null) {
+          updates.push(`sender_phone = $${paramIndex++}`);
           values.push(params.sender_phone);
         }
-        if (params.sender_username !== undefined) {
-          updates.push(`sender_username = COALESCE($${paramIndex++}, sender_username)`);
+        if (params.sender_username !== undefined && params.sender_username !== null) {
+          updates.push(`sender_username = $${paramIndex++}`);
           values.push(params.sender_username);
         }
-        if (params.sender_first_name !== undefined) {
-          updates.push(`sender_first_name = COALESCE($${paramIndex++}, sender_first_name)`);
+        if (params.sender_first_name !== undefined && params.sender_first_name !== null) {
+          updates.push(`sender_first_name = $${paramIndex++}`);
           values.push(params.sender_first_name);
         }
-        if (params.sender_last_name !== undefined) {
-          updates.push(`sender_last_name = COALESCE($${paramIndex++}, sender_last_name)`);
+        if (params.sender_last_name !== undefined && params.sender_last_name !== null) {
+          updates.push(`sender_last_name = $${paramIndex++}`);
           values.push(params.sender_last_name);
         }
 
         if (updates.length > 0) {
           values.push(existingThread.rows[0].id);
+          console.log(`🔄 Updating conversation ${existingThread.rows[0].id}: ${updates.join(', ')}`);
           await client.query(
             `UPDATE conversations 
              SET ${updates.join(', ')}, updated_at = NOW()
@@ -212,8 +220,10 @@ export class InboxService {
             `SELECT * FROM conversations WHERE id = $1`,
             [existingThread.rows[0].id]
           );
+          console.log(`✅ Conversation updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
           return updated.rows[0];
         }
+        console.log(`⏭️ No updates needed for conversation ${existingThread.rows[0].id}`);
         return existingThread.rows[0];
       }
 
