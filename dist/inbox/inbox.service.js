@@ -130,8 +130,16 @@ let InboxService = class InboxService {
                 const values = [];
                 let paramIndex = 1;
                 if (params.chat_title !== undefined) {
-                    updates.push(`chat_title = COALESCE($${paramIndex++}, chat_title)`);
-                    values.push(params.chat_title);
+                    // Обновляем chat_title если:
+                    // 1. Новое значение не null И не "Unknown" (всегда обновляем лучшее значение)
+                    // 2. Старое было "Unknown", а новое что-то другое
+                    const currentTitle = existingThread.rows[0].chat_title;
+                    const shouldUpdate = (params.chat_title && params.chat_title !== 'Unknown') ||
+                        (currentTitle === 'Unknown' && params.chat_title && params.chat_title !== 'Unknown');
+                    if (shouldUpdate || params.chat_title === null) {
+                        updates.push(`chat_title = $${paramIndex++}`);
+                        values.push(params.chat_title);
+                    }
                 }
                 if (params.chat_type !== undefined) {
                     updates.push(`chat_type = COALESCE($${paramIndex++}, chat_type)`);
@@ -142,34 +150,48 @@ let InboxService = class InboxService {
                     values.push(params.participant_count);
                 }
                 if (params.telegram_peer_id !== undefined) {
-                    updates.push(`telegram_peer_id = COALESCE($${paramIndex++}, telegram_peer_id)`);
-                    values.push(params.telegram_peer_id);
+                    // telegram_peer_id имеет приоритет - если есть (не null), всегда обновляем
+                    // Если null, не обновляем (оставляем старое значение)
+                    if (params.telegram_peer_id !== null) {
+                        updates.push(`telegram_peer_id = $${paramIndex++}`);
+                        values.push(params.telegram_peer_id);
+                    }
                 }
-                if (params.sender_phone !== undefined) {
-                    updates.push(`sender_phone = COALESCE($${paramIndex++}, sender_phone)`);
+                // Для контактных данных - обновляем только если новое значение не null
+                if (params.sender_phone !== undefined && params.sender_phone !== null) {
+                    updates.push(`sender_phone = $${paramIndex++}`);
                     values.push(params.sender_phone);
                 }
-                if (params.sender_username !== undefined) {
-                    updates.push(`sender_username = COALESCE($${paramIndex++}, sender_username)`);
+                if (params.sender_username !== undefined && params.sender_username !== null) {
+                    updates.push(`sender_username = $${paramIndex++}`);
                     values.push(params.sender_username);
                 }
-                if (params.sender_first_name !== undefined) {
-                    updates.push(`sender_first_name = COALESCE($${paramIndex++}, sender_first_name)`);
+                if (params.sender_first_name !== undefined && params.sender_first_name !== null) {
+                    updates.push(`sender_first_name = $${paramIndex++}`);
                     values.push(params.sender_first_name);
                 }
-                if (params.sender_last_name !== undefined) {
-                    updates.push(`sender_last_name = COALESCE($${paramIndex++}, sender_last_name)`);
+                if (params.sender_last_name !== undefined && params.sender_last_name !== null) {
+                    updates.push(`sender_last_name = $${paramIndex++}`);
                     values.push(params.sender_last_name);
                 }
                 if (updates.length > 0) {
                     values.push(existingThread.rows[0].id);
+                    const currentData = existingThread.rows[0];
+                    console.log(`🔄 Updating conversation ${existingThread.rows[0].id}: ${updates.join(', ')}`);
+                    console.log(`📊 Before update: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
+                    console.log(`📊 Update values: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
                     await client.query(`UPDATE conversations 
              SET ${updates.join(', ')}, updated_at = NOW()
              WHERE id = $${paramIndex}`, values);
                     // Fetch updated thread
                     const updated = await client.query(`SELECT * FROM conversations WHERE id = $1`, [existingThread.rows[0].id]);
+                    console.log(`✅ Conversation updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
                     return updated.rows[0];
                 }
+                const currentData = existingThread.rows[0];
+                console.log(`⏭️ No updates needed for conversation ${existingThread.rows[0].id}`);
+                console.log(`📊 Current data: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
+                console.log(`📊 Received params: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
                 return existingThread.rows[0];
             }
             // Create new thread with chat info
@@ -244,6 +266,39 @@ let InboxService = class InboxService {
        WHERE conversation_id = $1 
        ORDER BY created_at ASC`, [conversationId]);
         return result.rows;
+    }
+    /**
+     * Delete conversation and all related data
+     */
+    async deleteConversation(conversationId) {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Delete outbox entries
+            await client.query(`DELETE FROM outbox WHERE conversation_id = $1`, [conversationId]);
+            // Delete messages (CASCADE should handle this, but explicit is better)
+            await client.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
+            // Delete conversation
+            const result = await client.query(`DELETE FROM conversations WHERE id = $1 RETURNING id, channel_id`, [conversationId]);
+            // Remove from Redis unassigned set
+            await this.redis.srem('inbox:unassigned', conversationId);
+            await this.redis.del(`inbox:assignee:${conversationId}`);
+            await client.query('COMMIT');
+            if (result.rows.length === 0) {
+                return { success: false, message: 'Conversation not found' };
+            }
+            return {
+                success: true,
+                message: `Deleted conversation ${conversationId} (${result.rows[0].channel_id})`
+            };
+        }
+        catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        }
+        finally {
+            client.release();
+        }
     }
 };
 exports.InboxService = InboxService;

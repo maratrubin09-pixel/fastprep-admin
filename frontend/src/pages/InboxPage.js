@@ -49,13 +49,15 @@ const InboxPage = () => {
   const [sending, setSending] = useState(false);
   const socketRef = useRef(null);
   const messageInputRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const selectedThreadRef = useRef(null);
 
   // Fetch conversations on mount
   useEffect(() => {
     fetchConversations();
   }, []);
 
-  // Setup WebSocket connection
+  // Setup WebSocket connection (не зависит от selectedThread!)
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -85,22 +87,39 @@ const InboxPage = () => {
       socket.on('new_message', (data) => {
         console.log('📨 New message received:', data);
         
-        // Add message to current conversation if it's selected
-        if (selectedThread && data.conversationId === selectedThread.id) {
-          setMessages(prev => [...prev, data.message]);
-        }
-
-        // Update conversations list (move to top and update last_message_at)
+        // Update conversations list FIRST (move to top and update last_message_at)
         setConversations(prev => {
-          const updated = prev.map(conv => 
-            conv.id === data.conversationId 
-              ? { ...conv, last_message_at: data.message.created_at }
-              : conv
-          );
-          // Sort by last_message_at
-          return updated.sort((a, b) => 
-            new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at)
-          );
+          const existingConv = prev.find(conv => conv.id === data.conversationId);
+          
+          if (existingConv) {
+            // Обновляем существующий чат
+            const updated = prev.map(conv => 
+              conv.id === data.conversationId 
+                ? { ...conv, last_message_at: data.message.created_at }
+                : conv
+            );
+            // Сортируем по last_message_at
+            return updated.sort((a, b) => 
+              new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at)
+            );
+          } else {
+            // Если чата нет в списке (новый чат), обновляем список чатов
+            fetchConversations();
+            return prev;
+          }
+        });
+        
+        // Add message to current conversation if it's selected
+        setMessages(prev => {
+          // Проверяем, выбран ли этот чат (используем ref)
+          const currentThread = selectedThreadRef.current;
+          const isSelected = currentThread?.id === data.conversationId;
+          if (!isSelected) return prev;
+          
+          // Проверяем, нет ли уже этого сообщения
+          const exists = prev.find(msg => msg.id === data.message.id);
+          if (exists) return prev;
+          return [...prev, data.message];
         });
       });
 
@@ -109,13 +128,17 @@ const InboxPage = () => {
         console.log('📊 Message status update:', data);
         
         // Update message status in current conversation
-        if (selectedThread && data.conversationId === selectedThread.id) {
-          setMessages(prev => prev.map(msg => 
+        setMessages(prev => {
+          const currentThread = selectedThreadRef.current;
+          const isSelected = currentThread?.id === data.conversationId;
+          if (!isSelected) return prev;
+          
+          return prev.map(msg => 
             msg.id === data.messageId 
               ? { ...msg, delivery_status: data.status }
               : msg
-          ));
-        }
+          );
+        });
       });
 
       socket.on('disconnect', () => {
@@ -131,6 +154,11 @@ const InboxPage = () => {
     } catch (err) {
       console.error('Failed to setup WebSocket:', err);
     }
+  }, []); // Убрали зависимость от selectedThread - слушаем все сообщения!
+
+  // Обновляем ref при изменении selectedThread
+  useEffect(() => {
+    selectedThreadRef.current = selectedThread;
   }, [selectedThread]);
 
   // Fetch messages when thread is selected
@@ -139,6 +167,13 @@ const InboxPage = () => {
       fetchMessages(selectedThread.id);
     }
   }, [selectedThread]);
+
+  // Автопрокрутка к последнему сообщению
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   const fetchConversations = async () => {
     try {
@@ -454,6 +489,38 @@ const InboxPage = () => {
                               {msg.sender_name}
                             </Typography>
                           )}
+                          {/* Отображение медиафайлов */}
+                          {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                            <Box sx={{ mb: 1 }}>
+                              {msg.metadata.attachments.map((att, idx) => (
+                                <Box key={idx} sx={{ mb: 1 }}>
+                                  {att.type === 'photo' && (
+                                    <Typography variant="caption" display="block">📷 Photo</Typography>
+                                  )}
+                                  {att.type === 'video' && (
+                                    <Typography variant="caption" display="block">🎥 Video</Typography>
+                                  )}
+                                  {att.type === 'voice' && (
+                                    <Typography variant="caption" display="block">🎤 Voice message</Typography>
+                                  )}
+                                  {att.type === 'audio' && (
+                                    <Typography variant="caption" display="block">🎵 Audio: {att.fileName || 'audio'}</Typography>
+                                  )}
+                                  {att.type === 'document' && (
+                                    <Typography variant="caption" display="block">📎 {att.fileName || 'Document'}</Typography>
+                                  )}
+                                  {att.type === 'sticker' && (
+                                    <Typography variant="caption" display="block">😀 Sticker</Typography>
+                                  )}
+                                  {att.caption && (
+                                    <Typography variant="caption" display="block" sx={{ fontStyle: 'italic' }}>
+                                      {att.caption}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              ))}
+                            </Box>
+                          )}
                           <Typography variant="body1">{msg.text}</Typography>
                           <Box
                             sx={{
@@ -485,6 +552,8 @@ const InboxPage = () => {
                         </Paper>
                       </Box>
                     ))}
+                    {/* Ref для автопрокрутки */}
+                    <div ref={messagesEndRef} />
                   </Stack>
                 )}
               </Box>

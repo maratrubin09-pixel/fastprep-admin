@@ -97,6 +97,17 @@ let MessagesController = class MessagesController {
         // Возвращаем 201 Created с полными данными сообщения
         return message;
     }
+    /**
+     * DELETE /api/inbox/conversations/:id
+     * Удалить чат (для ручного удаления "Unknown" чатов)
+     */
+    async deleteConversation(threadId, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        return await this.inbox.deleteConversation(threadId);
+    }
 };
 exports.MessagesController = MessagesController;
 __decorate([
@@ -129,6 +140,16 @@ __decorate([
     __metadata("design:paramtypes", [String, SendMessageDto, Object]),
     __metadata("design:returntype", Promise)
 ], MessagesController.prototype, "sendMessage", null);
+__decorate([
+    (0, common_1.Delete)('conversations/:id'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "deleteConversation", null);
 exports.MessagesController = MessagesController = __decorate([
     (0, common_1.Controller)('inbox'),
     __metadata("design:paramtypes", [s3_service_1.S3Service,

@@ -147,8 +147,84 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         keys: Object.keys(message)
       })}`);
       
-      const text = message.message || message.text || '[Media]';
+      // Извлекаем текст и медиа из сообщения
+      let text = message.message || message.text || '';
       const attachments: any[] = [];
+      
+      // Обработка медиафайлов
+      if (message.media) {
+        const media = message.media;
+        
+        // Фото
+        if (media.photo || media.className === 'MessageMediaPhoto') {
+          attachments.push({
+            type: 'photo',
+            media: media,
+            caption: media.caption || text || '',
+          });
+          if (!text) text = '📷 Photo';
+        }
+        
+        // Видео
+        if (media.video || media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('video/')) {
+          attachments.push({
+            type: 'video',
+            media: media,
+            caption: media.caption || text || '',
+            mimeType: media.mimeType || 'video/mp4',
+          });
+          if (!text) text = '🎥 Video';
+        }
+        
+        // Голосовое сообщение
+        if (media.className === 'MessageMediaDocument' && (media.mimeType === 'audio/ogg' || media.mimeType === 'audio/x-voice' || media.voice)) {
+          attachments.push({
+            type: 'voice',
+            media: media,
+            caption: text || '',
+            mimeType: media.mimeType || 'audio/ogg',
+          });
+          if (!text) text = '🎤 Voice message';
+        }
+        
+        // Аудио файл
+        if (media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('audio/') && !media.voice) {
+          attachments.push({
+            type: 'audio',
+            media: media,
+            caption: media.caption || text || '',
+            mimeType: media.mimeType,
+            fileName: media.fileName || 'audio',
+          });
+          if (!text) text = '🎵 Audio file';
+        }
+        
+        // Документ
+        if (media.className === 'MessageMediaDocument' && !media.mimeType?.startsWith('video/') && !media.mimeType?.startsWith('audio/')) {
+          attachments.push({
+            type: 'document',
+            media: media,
+            caption: media.caption || text || '',
+            mimeType: media.mimeType || 'application/octet-stream',
+            fileName: media.fileName || 'file',
+          });
+          if (!text) text = '📎 Document';
+        }
+        
+        // Стикер
+        if (media.sticker || media.className === 'MessageMediaSticker') {
+          attachments.push({
+            type: 'sticker',
+            media: media,
+          });
+          if (!text) text = '😀 Sticker';
+        }
+      }
+      
+      // Если нет текста и нет медиа, помечаем как медиа
+      if (!text) {
+        text = '[Media]';
+      }
 
       // Get chat info
       let chatTitle = 'Unknown';

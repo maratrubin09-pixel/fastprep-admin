@@ -280,10 +280,17 @@ export class InboxService {
       await client.query('BEGIN');
 
       const result = await client.query(
-        `INSERT INTO messages (conversation_id, direction, text, external_message_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW())
+        `INSERT INTO messages (conversation_id, direction, text, external_message_id, sender_name, metadata, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
          RETURNING *`,
-        [params.conversation_id, params.direction, params.text, params.external_message_id || null]
+        [
+          params.conversation_id,
+          params.direction,
+          params.text,
+          params.external_message_id || null,
+          params.sender_name || null,
+          params.metadata ? JSON.stringify(params.metadata) : null,
+        ]
       );
 
       const message = result.rows[0];

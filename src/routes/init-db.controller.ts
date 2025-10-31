@@ -52,6 +52,7 @@ export class InitDbController {
       // Добавить колонки в messages (если нужны)
       await this.pool.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS metadata JSONB;
       `);
       await this.pool.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS object_key VARCHAR(500);
