@@ -335,20 +335,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           // Попробуем создать InputPeerUser напрямую, если есть доступная информация
           let entity = null;
           
-          // Если в message есть peerId с accessHash, используем его
+          // Если в message есть peerId с accessHash, сохраняем его для peerIdData, но все равно попробуем получить полный entity
+          let inputPeerFromPeerId = null;
           if (message.peerId && message.peerId.userId) {
             try {
-              entity = new Api.InputPeerUser({
+              inputPeerFromPeerId = new Api.InputPeerUser({
                 userId: bigInt(message.peerId.userId),
                 accessHash: bigInt(message.peerId.accessHash || '0'),
               });
               this.logger.log(`🔍 DEBUG: Method 2b - Created InputPeerUser from peerId`);
+              
+              // Сохраняем в peerIdData сразу
+              if (!peerIdData) {
+                const serialized: any = {
+                  _: 'InputPeerUser',
+                  userId: String(message.peerId.userId),
+                  accessHash: String(message.peerId.accessHash || '0')
+                };
+                peerIdData = JSON.stringify(serialized);
+                this.logger.log(`✅ Method 2b - Saved telegramPeerId from peerId: ${peerIdData}`);
+              }
             } catch (e) {
               this.logger.debug(`⚠️ Method 2b - Could not create InputPeerUser from peerId: ${e}`);
             }
           }
           
-          // Если не получилось, пробуем стандартный getEntity (может не работать для новых чатов)
+          // Пробуем получить полный entity через getEntity или getDialogs (для получения данных пользователя)
           if (!entity) {
             try {
               entity = await this.client.getEntity(chatId);
@@ -424,6 +436,56 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             const entityPhone = (entity as any).phone || null;
             
             this.logger.log(`🔍 DEBUG: Method 2b - Entity data: title=${entityTitle}, firstName=${entityFirstName}, lastName=${entityLastName}, username=${entityUsername}, phone=${entityPhone}`);
+            
+            // Если entity без данных (например, InputPeerUser создан из peerId), пробуем получить полный entity через getDialogs
+            const hasNoData = !entityFirstName && !entityLastName && !entityUsername && !entityPhone && !entityTitle;
+            const isInputPeerUser = (entity as any).className === 'InputPeerUser';
+            const isUserWithoutData = (entity as any).className === 'User' && hasNoData;
+            if (hasNoData && (isInputPeerUser || isUserWithoutData)) {
+              this.logger.log(`⚠️ Method 2b - Entity has no data, trying getDialogs to get full entity...`);
+              try {
+                const dialogs = await this.client.getDialogs({ limit: 200 });
+                const foundDialog = dialogs.find((d: any) => {
+                  const dId = d.entity?.id?.toString() || d.id?.toString();
+                  return dId === String(chatId);
+                });
+                if (foundDialog && foundDialog.entity) {
+                  // Заменяем entity на полный с данными
+                  entity = foundDialog.entity;
+                  this.logger.log(`✅ Method 2c - Found full entity in dialogs: className=${(entity as any).className || 'unknown'}`);
+                  
+                  // Обновляем данные
+                  const fullEntityTitle = (entity as any).title || (entity as any).firstName || null;
+                  const fullEntityFirstName = (entity as any).firstName || null;
+                  const fullEntityLastName = (entity as any).lastName || null;
+                  const fullEntityUsername = (entity as any).username || null;
+                  const fullEntityPhone = (entity as any).phone || null;
+                  
+                  // Обновляем sender данные
+                  if (!senderFirstName) senderFirstName = fullEntityFirstName;
+                  if (!senderLastName) senderLastName = fullEntityLastName;
+                  if (!senderUsername) senderUsername = fullEntityUsername;
+                  if (!senderPhone) senderPhone = fullEntityPhone;
+                  
+                  // Создаем telegramPeerId если еще не создан
+                  if (!peerIdData && (entity as any).className === 'User') {
+                    const userId = (entity as any).id;
+                    const accessHash = (entity as any).accessHash || '0';
+                    if (userId) {
+                      const serialized: any = {
+                        _: 'InputPeerUser',
+                        userId: String(userId),
+                        accessHash: String(accessHash)
+                      };
+                      peerIdData = JSON.stringify(serialized);
+                      this.logger.log(`✅ Method 2c - Created telegramPeerId from dialog entity: ${peerIdData}`);
+                    }
+                  }
+                }
+              } catch (dialogsError: any) {
+                this.logger.warn(`⚠️ Method 2c - getDialogs failed after empty entity: ${dialogsError.message || dialogsError}`);
+              }
+            }
             
             // Если это личный чат (User), сохраняем информацию о пользователе
             if ((entity as any).className === 'User') {
