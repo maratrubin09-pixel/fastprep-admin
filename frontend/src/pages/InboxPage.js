@@ -685,7 +685,11 @@ const InboxPage = () => {
                     onClick={() => setSelectedThread(conv)}
                     sx={{
                       '&.Mui-selected': {
-                        backgroundColor: 'primary.light',
+                        backgroundColor: '#E8EAF6', // Очень светло-фиолетовый вместо яркого
+                        color: '#6A1B9A', // Фиолетовый текст
+                        '&:hover': {
+                          backgroundColor: '#E8EAF6',
+                        },
                       },
                       backgroundColor: conv.unread_count > 0 ? 'action.hover' : 'transparent',
                       fontWeight: conv.unread_count > 0 ? 'bold' : 'normal',
@@ -773,7 +777,13 @@ const InboxPage = () => {
               {/* Messages */}
               <Box 
                 ref={messagesContainerRef}
-                sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}
+                sx={{ 
+                  flex: 1, 
+                  overflow: 'auto', 
+                  p: 2, 
+                  position: 'relative',
+                  backgroundColor: '#F8F9FA', // Очень светло-серый фон для области чата
+                }}
               >
                 {showScrollToBottom && (
                   <Button
@@ -813,8 +823,10 @@ const InboxPage = () => {
                           sx={{
                             p: 2,
                             maxWidth: '70%',
-                            backgroundColor: msg.direction === 'out' ? 'primary.main' : 'grey.100',
+                            backgroundColor: msg.direction === 'out' ? '#BA68C8' : 'white', // Очень мягкий фиолетовый (light purple) для исходящих, белый для входящих
                             color: msg.direction === 'out' ? 'white' : 'text.primary',
+                            border: msg.direction === 'in' ? '1px solid #e0e0e0' : 'none', // Легкая рамка для входящих
+                            boxShadow: msg.direction === 'in' ? '0 1px 2px rgba(0,0,0,0.05)' : '0 1px 2px rgba(156,39,176,0.2)', // Мягкие тени
                             wordWrap: 'break-word',
                             overflowWrap: 'break-word',
                             '& .message-link': {

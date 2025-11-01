@@ -137,20 +137,20 @@ const Sidebar = () => {
                     mx: 1,
                     borderRadius: 1,
                     '&.Mui-selected': {
-                      backgroundColor: 'primary.main',
-                      color: 'white',
+                      backgroundColor: '#E8EAF6', // Очень светло-фиолетовый вместо яркого
+                      color: '#6A1B9A', // Фиолетовый текст
                       '&:hover': {
-                        backgroundColor: 'primary.dark',
+                        backgroundColor: '#E8EAF6',
                       },
                       '& .MuiListItemIcon-root': {
-                        color: 'white',
+                        color: '#6A1B9A', // Фиолетовые иконки
                       },
                     },
                   }}
                 >
                   <ListItemIcon
                     sx={{
-                      color: isActive(section.path) ? 'white' : 'inherit',
+                      color: isActive(section.path) ? '#6A1B9A' : 'inherit',
                       minWidth: 40,
                     }}
                   >
@@ -192,17 +192,17 @@ const Sidebar = () => {
                             mx: 1,
                             borderRadius: 1,
                             '&.Mui-selected': {
-                              backgroundColor: 'primary.light',
-                              color: 'primary.main',
+                              backgroundColor: '#E8EAF6', // Очень светло-фиолетовый вместо яркого
+                              color: '#6A1B9A', // Фиолетовый текст
                               '&:hover': {
-                                backgroundColor: 'primary.light',
+                                backgroundColor: '#E8EAF6',
                               },
                             },
                           }}
                         >
                           <ListItemIcon
                             sx={{
-                              color: isActive(item.path) ? 'primary.main' : 'inherit',
+                              color: isActive(item.path) ? '#6A1B9A' : 'inherit',
                               minWidth: 40,
                             }}
                           >
