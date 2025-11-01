@@ -815,10 +815,16 @@ const InboxPage = () => {
                             maxWidth: '70%',
                             backgroundColor: msg.direction === 'out' ? 'primary.main' : 'grey.100',
                             color: msg.direction === 'out' ? 'white' : 'text.primary',
+                            wordWrap: 'break-word',
+                            overflowWrap: 'break-word',
                             '& .message-link': {
+                              wordBreak: 'break-all',
+                              overflowWrap: 'anywhere',
                               '& a': {
                                 color: '#1976d2', // Синий цвет ссылок
                                 textDecoration: 'underline',
+                                wordBreak: 'break-all',
+                                overflowWrap: 'anywhere',
                                 '&:hover': {
                                   opacity: 0.8,
                                 },
@@ -868,7 +874,15 @@ const InboxPage = () => {
                               ))}
                             </Box>
                           )}
-                          <Typography variant="body1" component="div">
+                          <Typography 
+                            variant="body1" 
+                            component="div"
+                            sx={{
+                              wordWrap: 'break-word',
+                              overflowWrap: 'break-word',
+                              wordBreak: 'break-word',
+                            }}
+                          >
                             <Linkify
                               options={{
                                 target: '_blank',
