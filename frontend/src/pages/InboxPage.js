@@ -144,7 +144,15 @@ const MediaPreview = ({ objectKey }) => {
               borderRadius: '8px',
               objectFit: 'cover',
             }}
-            onError={() => setIsImage(false)}
+            onError={(e) => {
+              console.error('❌ Failed to load image:', imageUrl);
+              console.error('Error event:', e);
+              setIsImage(false);
+              setImageUrl(null);
+            }}
+            onLoad={() => {
+              console.log('✅ Image loaded successfully:', objectKey);
+            }}
           />
         </Box>
         {openModal && (
@@ -210,6 +218,7 @@ const InboxPage = () => {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [attachedFileKey, setAttachedFileKey] = useState(null);
+  const [fileUploadResetKey, setFileUploadResetKey] = useState(0);
   const socketRef = useRef(null);
   const messageInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -298,10 +307,13 @@ const InboxPage = () => {
               }
               return conv;
             });
-            // Сортируем по last_message_at
-            return updated.sort((a, b) => 
-              new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at)
-            );
+            // Сортируем по last_message_at (более свежие сверху)
+            const sorted = updated.sort((a, b) => {
+              const dateA = new Date(a.last_message_at || a.created_at || 0).getTime();
+              const dateB = new Date(b.last_message_at || b.created_at || 0).getTime();
+              return dateB - dateA;
+            });
+            return sorted;
           } else {
             // Если чата нет в списке (новый чат или восстановленный), обновляем список чатов
             console.log('🔄 Conversation not in list, fetching updated list...');
@@ -310,12 +322,12 @@ const InboxPage = () => {
           }
         });
         
+        // Проверяем, выбран ли этот чат (используем ref) ПЕРЕД добавлением сообщения
+        const currentThread = selectedThreadRef.current;
+        const isSelected = currentThread?.id === data.conversationId;
+        
         // Add message to current conversation if it's selected
         setMessages(prev => {
-          // Проверяем, выбран ли этот чат (используем ref)
-          const currentThread = selectedThreadRef.current;
-          const isSelected = currentThread?.id === data.conversationId;
-          
           if (!isSelected) {
             console.log(`⏭️ Message not added to UI (chat not selected): ${data.conversationId}`);
             return prev;
@@ -331,6 +343,28 @@ const InboxPage = () => {
           console.log(`✅ Adding message to UI: ${data.message.id}`);
           return [...prev, data.message];
         });
+        
+        // Автопрокрутка для новых сообщений в активном чате
+        if (isSelected) {
+          // Используем два таймаута для гарантии обновления DOM
+          setTimeout(() => {
+            if (messagesContainerRef.current) {
+              const container = messagesContainerRef.current;
+              container.scrollTop = container.scrollHeight;
+            } else if (messagesEndRef.current) {
+              messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 100); // Первая попытка через 100ms
+          
+          setTimeout(() => {
+            if (messagesContainerRef.current) {
+              const container = messagesContainerRef.current;
+              container.scrollTop = container.scrollHeight;
+            } else if (messagesEndRef.current) {
+              messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 300); // Вторая попытка через 300ms для надежности
+        }
       });
 
       // Handle message status updates
@@ -384,16 +418,23 @@ const InboxPage = () => {
     }
   }, [selectedThread]);
 
-  // Умная автопрокрутка - только если пользователь уже внизу
+  // Умная автопрокрутка - всегда для новых сообщений, или если пользователь уже внизу
   useEffect(() => {
     if (!messagesContainerRef.current || messages.length === 0) return;
 
     const container = messagesContainerRef.current;
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
 
-    // Прокручиваем только если пользователь уже внизу
+    // Прокручиваем если пользователь уже внизу (увеличили порог до 200px)
     if (isNearBottom && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      // Используем requestAnimationFrame для гарантии обновления DOM
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 50);
+      });
     }
   }, [messages]);
 
@@ -523,6 +564,7 @@ const InboxPage = () => {
       // Очищаем поле ввода и вложение
       setMessageText('');
       setAttachedFileKey(null);
+      setFileUploadResetKey(prev => prev + 1); // Сбрасываем FileUpload компонент
       if (messageInputRef.current) {
         messageInputRef.current.value = '';
       }
@@ -823,22 +865,24 @@ const InboxPage = () => {
                           sx={{
                             p: 2,
                             maxWidth: '70%',
-                            backgroundColor: msg.direction === 'out' ? '#BA68C8' : 'white', // Очень мягкий фиолетовый (light purple) для исходящих, белый для входящих
-                            color: msg.direction === 'out' ? 'white' : 'text.primary',
-                            border: msg.direction === 'in' ? '1px solid #e0e0e0' : 'none', // Легкая рамка для входящих
-                            boxShadow: msg.direction === 'in' ? '0 1px 2px rgba(0,0,0,0.05)' : '0 1px 2px rgba(156,39,176,0.2)', // Мягкие тени
+                            backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
+                            color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
+                            border: msg.direction === 'in' ? '1px solid #e0e0e0' : '2px solid #BA68C8', // Фиолетовая рамка для исходящих
+                            boxShadow: msg.direction === 'in' ? '0 1px 2px rgba(0,0,0,0.05)' : '0 1px 3px rgba(156,39,176,0.15)', // Мягкие тени
                             wordWrap: 'break-word',
                             overflowWrap: 'break-word',
                             '& .message-link': {
                               wordBreak: 'break-all',
                               overflowWrap: 'anywhere',
                               '& a': {
-                                color: msg.direction === 'out' ? '#F06292' : '#9C27B0', // Розовый для исходящих, фиолетовый для входящих
+                                color: msg.direction === 'out' ? '#6A1B9A' : '#9C27B0', // Темно-фиолетовый для исходящих (лучше читается), фиолетовый для входящих
                                 textDecoration: 'underline',
+                                fontWeight: 500, // Чуть жирнее для лучшей читаемости
                                 wordBreak: 'break-all',
                                 overflowWrap: 'anywhere',
                                 '&:hover': {
-                                  opacity: 0.8,
+                                  opacity: 0.7,
+                                  textDecoration: 'underline',
                                 },
                               },
                             },
@@ -955,6 +999,7 @@ const InboxPage = () => {
                 <Box display="flex" gap={1} alignItems="flex-end">
                   <FileUpload
                     threadId={selectedThread.id}
+                    resetKey={fileUploadResetKey}
                     onFileUploaded={(objectKey) => {
                       setAttachedFileKey(objectKey);
                       // Если файл удален (objectKey === null), очищаем состояние

@@ -48,7 +48,7 @@ const ALLOWED_TYPES = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { icon: <DescriptionIcon />, label: 'Excel' },
 };
 
-const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = null }) => {
+const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = null, resetKey = null }) => {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
@@ -64,6 +64,18 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
       }
     }
   }, [threadId]);
+
+  // Сбрасываем состояние когда resetKey изменяется (сигнал сброса из родителя)
+  React.useEffect(() => {
+    if (resetKey !== null) {
+      setUploadedFile(null);
+      setError(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      onFileUploaded?.(null);
+    }
+  }, [resetKey, onFileUploaded]);
 
   const handleFileSelect = async (event) => {
     const file = event.target.files?.[0];

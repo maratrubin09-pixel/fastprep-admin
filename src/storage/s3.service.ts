@@ -86,7 +86,7 @@ export class S3Service {
   /**
    * Генерация presigned GET URL для скачивания файла
    */
-  async createPresignedGet(key: string, expiresIn = 300): Promise<string> {
+  async createPresignedGet(key: string, expiresIn = 3600): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -113,28 +113,39 @@ export class S3Service {
    * Скачать файл из S3
    */
   async getObject(key: string): Promise<{ body: Buffer; contentType?: string }> {
+    console.log(`📥 getObject: key=${key}, bucket=${this.bucket}, endpoint=${process.env.S3_ENDPOINT}`);
+    
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
     });
     
-    const response = await this.client.send(command);
-    
-    if (!response.Body) {
-      throw new Error(`File not found in S3: ${key}`);
+    let response;
+    try {
+      response = await this.client.send(command);
+      
+      if (!response.Body) {
+        console.error(`❌ File not found in S3: ${key}`);
+        throw new Error(`File not found in S3: ${key}`);
+      }
+      
+      console.log(`✅ Object retrieved from S3: key=${key}, contentType=${response.ContentType || 'unknown'}, contentLength=${response.ContentLength || 'unknown'}`);
+    } catch (error: any) {
+      console.error(`❌ Error getting object from S3: key=${key}, error=${error.message || error}`);
+      throw error;
     }
 
     // AWS SDK v3 возвращает Readable stream
     // Конвертируем stream в Buffer
     const chunks: Uint8Array[] = [];
-    const stream = response.Body as any;
+    const stream = response!.Body as any;
     
     // Проверяем, есть ли метод transformToByteArray (для AWS SDK v3)
     if (typeof stream.transformToByteArray === 'function') {
       const buffer = await stream.transformToByteArray();
       return {
         body: Buffer.from(buffer),
-        contentType: response.ContentType,
+        contentType: response!.ContentType,
       };
     }
     
@@ -145,7 +156,7 @@ export class S3Service {
         const buffer = Buffer.concat(chunks);
         resolve({
           body: buffer,
-          contentType: response.ContentType,
+          contentType: response!.ContentType,
         });
       });
       stream.on('error', reject);
