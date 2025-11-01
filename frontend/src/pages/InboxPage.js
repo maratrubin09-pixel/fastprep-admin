@@ -30,6 +30,7 @@ import {
   AttachFile as AttachFileIcon,
 } from '@mui/icons-material';
 import { io } from 'socket.io-client';
+import Linkify from 'linkify-react';
 import DashboardLayout from '../components/DashboardLayout';
 import FileUpload from '../components/FileUpload';
 
@@ -814,6 +815,15 @@ const InboxPage = () => {
                             maxWidth: '70%',
                             backgroundColor: msg.direction === 'out' ? 'primary.main' : 'grey.100',
                             color: msg.direction === 'out' ? 'white' : 'text.primary',
+                            '& .message-link': {
+                              '& a': {
+                                color: '#1976d2', // Синий цвет ссылок
+                                textDecoration: 'underline',
+                                '&:hover': {
+                                  opacity: 0.8,
+                                },
+                              },
+                            },
                           }}
                         >
                           {msg.sender_name && msg.direction === 'in' && (
@@ -858,7 +868,17 @@ const InboxPage = () => {
                               ))}
                             </Box>
                           )}
-                          <Typography variant="body1">{msg.text}</Typography>
+                          <Typography variant="body1" component="div">
+                            <Linkify
+                              options={{
+                                target: '_blank',
+                                rel: 'noopener noreferrer',
+                                className: 'message-link',
+                              }}
+                            >
+                              {msg.text}
+                            </Linkify>
+                          </Typography>
                           <Box
                             sx={{
                               display: 'flex',
