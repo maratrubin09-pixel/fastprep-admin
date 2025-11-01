@@ -54,41 +54,67 @@ export class UploadsController {
   @Post('presign')
   @UseGuards(PepGuard)
   @RequirePerm('inbox.send_message')
-  async presign(@Body() dto: PresignRequestDto) {
+  async presign(@Body() dto: any) {
     try {
+      // Логируем входящие данные для отладки
+      console.log('📥 Presign request received:', {
+        threadId: dto?.threadId,
+        filename: dto?.filename,
+        contentType: dto?.contentType,
+        size: dto?.size,
+        allKeys: Object.keys(dto || {}),
+      });
+
+      // Поддержка обоих вариантов названий (camelCase и snake_case)
+      const threadId = dto?.threadId || dto?.thread_id;
+      const filename = dto?.filename || dto?.fileName;
+      const contentType = dto?.contentType || dto?.content_type;
+      const size = dto?.size;
+
       // Валидация входных данных
-      if (!dto.threadId || !dto.filename || !dto.contentType || typeof dto.contentType !== 'string') {
+      if (!threadId || !filename || !contentType || typeof contentType !== 'string') {
+        console.error('❌ Missing required fields:', { threadId: !!threadId, filename: !!filename, contentType: !!contentType });
         throw new BadRequestException({ 
           code: 'INVALID_REQUEST', 
-          message: 'Missing required fields: threadId, filename, contentType' 
+          message: 'Missing required fields: threadId, filename, contentType',
+          received: {
+            threadId: !!threadId,
+            filename: !!filename,
+            contentType: !!contentType,
+            allFields: Object.keys(dto || {}),
+          }
         });
       }
 
       // Нормализуем contentType (убираем пробелы, приводим к нижнему регистру для сравнения)
-      const contentType = dto.contentType.trim().toLowerCase();
+      const normalizedContentType = contentType.trim().toLowerCase();
+      
+      console.log('✅ Validated fields:', { threadId, filename, contentType: normalizedContentType, size });
       
       // Нормализуем список разрешенных типов для сравнения
       const normalizedAllowedTypes = ALLOWED_TYPES.map(t => t.toLowerCase());
 
       // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
       const isAllowed = 
-        normalizedAllowedTypes.includes(contentType) || 
-        contentType.startsWith('image/') || 
-        contentType.startsWith('video/') || 
-        contentType.startsWith('audio/');
+        normalizedAllowedTypes.includes(normalizedContentType) || 
+        normalizedContentType.startsWith('image/') || 
+        normalizedContentType.startsWith('video/') || 
+        normalizedContentType.startsWith('audio/');
       
       if (!isAllowed) {
         throw new BadRequestException({ 
           code: 'TYPE_NOT_ALLOWED', 
-          message: `Content type not allowed: ${contentType}. Allowed: images, videos, audio, and documents` 
+          message: `Content type not allowed: ${normalizedContentType}. Allowed: images, videos, audio, and documents` 
         });
       }
-      if (dto.size > MAX_SIZE) {
+      if (size && size > MAX_SIZE) {
         throw new BadRequestException({ code: 'SIZE_EXCEEDED', message: 'File size exceeds limit' });
       }
 
-      const prefix = `inbox/${dto.threadId}/`;
-      const result = await this.s3.createPresignedPut(prefix, dto.filename, contentType, 600);
+      const prefix = `inbox/${threadId}/`;
+      const result = await this.s3.createPresignedPut(prefix, filename, normalizedContentType, 600);
+      
+      console.log('✅ Presigned URL generated:', result.objectKey);
 
       return result;
     } catch (error: any) {

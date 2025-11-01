@@ -43,7 +43,12 @@ const MediaPreview = ({ objectKey }) => {
   const [openModal, setOpenModal] = useState(false);
 
   React.useEffect(() => {
-    if (!objectKey) return;
+    if (!objectKey) {
+      setLoading(false);
+      return;
+    }
+
+    console.log('🖼️ MediaPreview loading objectKey:', objectKey);
 
     // Определяем тип файла по расширению
     const extension = objectKey.split('.').pop()?.toLowerCase();
@@ -57,18 +62,27 @@ const MediaPreview = ({ objectKey }) => {
       const token = localStorage.getItem('token');
       const downloadUrl = `${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}?url=true`;
       
+      console.log('🔗 Requesting presigned URL:', downloadUrl);
+      
       // Запрашиваем presigned URL напрямую
       fetch(downloadUrl, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       })
-        .then(res => res.json())
+        .then(res => {
+          console.log('📥 Presigned URL response status:', res.status);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          return res.json();
+        })
         .then(data => {
+          console.log('✅ Got presigned URL:', data.url?.substring(0, 50) + '...');
           setImageUrl(data.url);
         })
         .catch(err => {
-          console.error('Failed to get image URL:', err);
+          console.error('❌ Failed to get image URL:', err);
           // Fallback - пробуем напрямую через download endpoint
           setImageUrl(`${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}`);
         })
@@ -488,9 +502,17 @@ const InboxPage = () => {
       
       // Получаем созданное сообщение из ответа
       const newMessage = await response.json();
+      console.log('📤 New message from server:', newMessage);
+      console.log('📤 Object key:', newMessage.object_key || newMessage.objectKey);
       
       // Немедленно добавляем сообщение в UI со статусом "queued" (отправляется...)
-      setMessages(prev => [...prev, newMessage]);
+      // Убеждаемся, что объект имеет правильную структуру
+      const messageToAdd = {
+        ...newMessage,
+        object_key: newMessage.object_key || newMessage.objectKey, // Поддержка обоих вариантов
+        direction: 'out',
+      };
+      setMessages(prev => [...prev, messageToAdd]);
       
       // Показываем успешное уведомление только если есть текст (для файлов может быть пустой)
       if (text.trim()) {
@@ -800,9 +822,9 @@ const InboxPage = () => {
                             </Typography>
                           )}
                           {/* Отображение медиафайлов */}
-                          {msg.object_key && (
+                          {(msg.object_key || msg.objectKey) && (
                             <Box sx={{ mb: 1 }}>
-                              <MediaPreview objectKey={msg.object_key} />
+                              <MediaPreview objectKey={msg.object_key || msg.objectKey} />
                             </Box>
                           )}
                           {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
