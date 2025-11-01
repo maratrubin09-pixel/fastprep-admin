@@ -69,15 +69,40 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Проверка, что threadId существует
+    if (!threadId) {
+      setError('Пожалуйста, выберите чат для отправки файла');
+      return;
+    }
+
+    // Проверка типа файла - если file.type пустой, используем расширение
+    let fileType = file.type;
+    if (!fileType || fileType === '') {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      // Попробуем определить тип по расширению
+      const extensionMap = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'pdf': 'application/pdf',
+        'mp4': 'video/mp4',
+        'mov': 'video/quicktime',
+        'mp3': 'audio/mpeg',
+      };
+      fileType = extensionMap[extension] || 'application/octet-stream';
+    }
+
     // Валидация типа - разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке документов
     const isAllowed = 
-      ALLOWED_TYPES[file.type] || 
-      file.type.startsWith('image/') || 
-      file.type.startsWith('video/') || 
-      file.type.startsWith('audio/');
+      ALLOWED_TYPES[fileType] || 
+      (fileType && fileType.startsWith('image/')) || 
+      (fileType && fileType.startsWith('video/')) || 
+      (fileType && fileType.startsWith('audio/'));
     
     if (!isAllowed) {
-      setError(`Тип файла не поддерживается: ${file.type}`);
+      setError(`Тип файла не поддерживается: ${fileType || 'unknown'}`);
       return;
     }
 
@@ -93,18 +118,26 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     try {
       // 1. Получаем presigned URL
       const token = localStorage.getItem('token');
+      
+      // Убеждаемся, что все поля заполнены
+      const requestBody = {
+        threadId: threadId,
+        filename: file.name || 'file',
+        contentType: fileType,
+        size: file.size,
+      };
+
+      if (!requestBody.threadId || !requestBody.filename || !requestBody.contentType) {
+        throw new Error('Missing required fields: threadId, filename, contentType');
+      }
+
       const presignResponse = await fetch(`${API_URL}/api/inbox/uploads/presign`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          threadId: threadId,
-          filename: file.name,
-          contentType: file.type,
-          size: file.size,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!presignResponse.ok) {
@@ -124,7 +157,7 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
       const uploadResponse = await fetch(putUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': file.type,
+          'Content-Type': fileType,
         },
         body: file,
       });
@@ -137,11 +170,11 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
       setUploadedFile({
         objectKey,
         filename: file.name,
-        contentType: file.type,
+        contentType: fileType,
         size: file.size,
       });
 
-      onFileUploaded?.(objectKey, file.name, file.type);
+      onFileUploaded?.(objectKey, file.name, fileType);
     } catch (err) {
       const errorMessage = err.message || 'Ошибка загрузки файла';
       setError(errorMessage);
