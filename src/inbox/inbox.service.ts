@@ -130,6 +130,7 @@ export class InboxService {
 
   /**
    * Find or create conversation thread by channel_id
+   * Also searches by external_chat_id, sender_phone, and telegram_peer_id to find deleted conversations
    */
   async findOrCreateThread(params: {
     channel_id: string;
@@ -146,17 +147,65 @@ export class InboxService {
   }): Promise<any> {
     const client = await this.pool.connect();
     try {
-      // Try to find existing thread
-      const existingThread = await client.query(
+      // Try to find existing thread by channel_id (including deleted ones)
+      let existingThread = await client.query(
         `SELECT * FROM conversations WHERE channel_id = $1`,
         [params.channel_id]
       );
 
+      // If not found, try to find by other identifiers (even if deleted)
+      if (existingThread.rows.length === 0) {
+        const searchConditions: string[] = [];
+        const searchValues: any[] = [];
+        let paramIndex = 1;
+
+        if (params.external_chat_id) {
+          searchConditions.push(`external_chat_id = $${paramIndex++}`);
+          searchValues.push(params.external_chat_id);
+        }
+        if (params.sender_phone) {
+          searchConditions.push(`sender_phone = $${paramIndex++}`);
+          searchValues.push(params.sender_phone);
+        }
+        if (params.telegram_peer_id) {
+          searchConditions.push(`telegram_peer_id = $${paramIndex++}`);
+          searchValues.push(params.telegram_peer_id);
+        }
+
+        if (searchConditions.length > 0) {
+          const searchQuery = `
+            SELECT * FROM conversations 
+            WHERE (${searchConditions.join(' OR ')})
+            ORDER BY deleted_at NULLS FIRST, created_at DESC
+            LIMIT 1
+          `;
+          existingThread = await client.query(searchQuery, searchValues);
+        }
+      }
+
       if (existingThread.rows.length > 0) {
+        const foundThread = existingThread.rows[0];
+        const isDeleted = foundThread.deleted_at !== null;
+
+        // If thread was deleted, restore it
+        if (isDeleted) {
+          await client.query(
+            `UPDATE conversations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1`,
+            [foundThread.id]
+          );
+          // Re-add to Redis unassigned set if it was removed
+          await this.redis.sadd('inbox:unassigned', foundThread.id);
+        }
         // Update chat info if provided (обновляем только если новое значение не null)
         const updates: string[] = [];
         const values: any[] = [];
         let paramIndex = 1;
+
+        // Update channel_id if it changed (for restored conversations)
+        if (foundThread.channel_id !== params.channel_id) {
+          updates.push(`channel_id = $${paramIndex++}`);
+          values.push(params.channel_id);
+        }
 
         if (params.chat_title !== undefined) {
           // Обновляем chat_title если:
@@ -207,9 +256,9 @@ export class InboxService {
         }
 
         if (updates.length > 0) {
-          values.push(existingThread.rows[0].id);
-          const currentData = existingThread.rows[0];
-          console.log(`🔄 Updating conversation ${existingThread.rows[0].id}: ${updates.join(', ')}`);
+          values.push(foundThread.id);
+          const currentData = foundThread;
+          console.log(`🔄 Updating conversation ${foundThread.id}: ${updates.join(', ')}`);
           console.log(`📊 Before update: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
           console.log(`📊 Update values: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
           
@@ -222,16 +271,16 @@ export class InboxService {
           // Fetch updated thread
           const updated = await client.query(
             `SELECT * FROM conversations WHERE id = $1`,
-            [existingThread.rows[0].id]
+            [foundThread.id]
           );
-          console.log(`✅ Conversation updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
+          console.log(`✅ Conversation ${isDeleted ? 'restored and ' : ''}updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
           return updated.rows[0];
         }
-        const currentData = existingThread.rows[0];
-        console.log(`⏭️ No updates needed for conversation ${existingThread.rows[0].id}`);
+        const currentData = foundThread;
+        console.log(`⏭️ No updates needed for conversation ${foundThread.id}`);
         console.log(`📊 Current data: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
         console.log(`📊 Received params: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
-        return existingThread.rows[0];
+        return foundThread;
       }
 
       // Create new thread with chat info
@@ -266,6 +315,7 @@ export class InboxService {
 
   /**
    * Create incoming message
+   * Increments unread_count if direction is 'in'
    */
   async createMessage(params: {
     conversation_id: string;
@@ -295,11 +345,22 @@ export class InboxService {
 
       const message = result.rows[0];
 
-      // Update thread's last_message_at
-      await client.query(
-        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [params.conversation_id]
-      );
+      // Update thread's last_message_at and increment unread_count for incoming messages
+      if (params.direction === 'in') {
+        await client.query(
+          `UPDATE conversations 
+           SET last_message_at = NOW(), 
+               unread_count = unread_count + 1,
+               updated_at = NOW() 
+           WHERE id = $1`,
+          [params.conversation_id]
+        );
+      } else {
+        await client.query(
+          `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [params.conversation_id]
+        );
+      }
 
       await client.query('COMMIT');
 
@@ -310,6 +371,16 @@ export class InboxService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Mark conversation as read (reset unread_count)
+   */
+  async markConversationAsRead(conversationId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversations SET unread_count = 0, updated_at = NOW() WHERE id = $1`,
+      [conversationId]
+    );
   }
 
   /**
@@ -324,11 +395,12 @@ export class InboxService {
   }
 
   /**
-   * Get all conversations ordered by last activity
+   * Get all conversations ordered by last activity (excluding deleted)
    */
   async getAllConversations(): Promise<any[]> {
     const result = await this.pool.query(
       `SELECT * FROM conversations 
+       WHERE deleted_at IS NULL
        ORDER BY COALESCE(last_message_at, created_at) DESC
        LIMIT 100`
     );
@@ -349,40 +421,42 @@ export class InboxService {
   }
 
   /**
-   * Delete conversation and all related data
+   * Soft delete conversation (mark as deleted instead of physically deleting)
+   * This allows restoring conversations when new messages arrive from the same sender
    */
   async deleteConversation(conversationId: string): Promise<{ success: boolean; message: string }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Delete outbox entries
-      await client.query(
-        `DELETE FROM outbox WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      // Delete messages (CASCADE should handle this, but explicit is better)
-      await client.query(
-        `DELETE FROM messages WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      // Delete conversation
+      // Soft delete conversation (mark as deleted)
       const result = await client.query(
-        `DELETE FROM conversations WHERE id = $1 RETURNING id, channel_id`,
+        `UPDATE conversations 
+         SET deleted_at = NOW(), updated_at = NOW() 
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id, channel_id`,
         [conversationId]
       );
+
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        // Check if conversation exists but is already deleted
+        const existing = await client.query(
+          `SELECT id FROM conversations WHERE id = $1`,
+          [conversationId]
+        );
+        if (existing.rows.length === 0) {
+          return { success: false, message: 'Conversation not found' };
+        } else {
+          return { success: false, message: 'Conversation already deleted' };
+        }
+      }
 
       // Remove from Redis unassigned set
       await this.redis.srem('inbox:unassigned', conversationId);
       await this.redis.del(`inbox:assignee:${conversationId}`);
 
       await client.query('COMMIT');
-
-      if (result.rows.length === 0) {
-        return { success: false, message: 'Conversation not found' };
-      }
 
       return { 
         success: true, 
@@ -396,6 +470,9 @@ export class InboxService {
     }
   }
 }
+
+
+
 
 
 

@@ -49,6 +49,30 @@ export class InitDbController {
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_last_name VARCHAR(255);
       `);
 
+      // Добавить колонку для soft delete
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      `);
+      
+      // Добавить колонку для непрочитанных сообщений
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unread_count INT NOT NULL DEFAULT 0;
+      `);
+
+      // Добавить индексы для поиска по идентификаторам
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_external_chat_id 
+        ON conversations (external_chat_id) WHERE deleted_at IS NULL;
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_sender_phone 
+        ON conversations (sender_phone) WHERE deleted_at IS NULL AND sender_phone IS NOT NULL;
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_telegram_peer_id 
+        ON conversations (telegram_peer_id) WHERE deleted_at IS NULL AND telegram_peer_id IS NOT NULL;
+      `);
+
       // Добавить колонки в messages (если нужны)
       await this.pool.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES users(id) ON DELETE SET NULL;
@@ -292,6 +316,7 @@ export class InitDbController {
     }
   }
 }
+
 
 
 

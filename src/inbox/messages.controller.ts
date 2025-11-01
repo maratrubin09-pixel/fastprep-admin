@@ -41,7 +41,7 @@ export class MessagesController {
 
   /**
    * GET /api/inbox/conversations/:id/messages
-   * Get all messages for a conversation
+   * Get all messages for a conversation and mark as read
    */
   @Get('conversations/:id/messages')
   @UseGuards(PepGuard)
@@ -51,6 +51,9 @@ export class MessagesController {
     if (!userId) {
       throw new BadRequestException('User not authenticated');
     }
+    
+    // Mark conversation as read when opening it
+    await this.inbox.markConversationAsRead(threadId);
     
     return await this.inbox.getMessages(threadId);
   }
@@ -117,6 +120,7 @@ export class MessagesController {
     return await this.inbox.deleteConversation(threadId);
   }
 }
+
 
 
 
