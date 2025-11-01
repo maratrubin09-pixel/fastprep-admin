@@ -116,6 +116,8 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     setUploading(true);
 
     try {
+      console.log('📤 Starting file upload:', { threadId, filename: file.name, contentType: fileType, size: file.size });
+      
       // 1. Получаем presigned URL
       const token = localStorage.getItem('token');
       
@@ -131,6 +133,9 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
         throw new Error('Missing required fields: threadId, filename, contentType');
       }
 
+      console.log('📤 Requesting presigned URL from:', `${API_URL}/api/inbox/uploads/presign`);
+      console.log('📤 Request body:', requestBody);
+
       const presignResponse = await fetch(`${API_URL}/api/inbox/uploads/presign`, {
         method: 'POST',
         headers: {
@@ -140,6 +145,8 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
         body: JSON.stringify(requestBody),
       });
 
+      console.log('📥 Presign response status:', presignResponse.status, presignResponse.statusText);
+
       if (!presignResponse.ok) {
         let errorData;
         try {
@@ -147,13 +154,17 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
         } catch (e) {
           errorData = { message: `Server error: ${presignResponse.status} ${presignResponse.statusText}` };
         }
+        console.error('❌ Presign error:', errorData);
         const errorMessage = errorData.message || errorData.code || `Failed to get upload URL (${presignResponse.status})`;
         throw new Error(errorMessage);
       }
 
-      const { putUrl, objectKey } = await presignResponse.json();
+      const presignData = await presignResponse.json();
+      console.log('✅ Got presigned URL, objectKey:', presignData.objectKey);
+      const { putUrl, objectKey } = presignData;
 
       // 2. Загружаем файл в S3
+      console.log('📤 Uploading file to S3...');
       const uploadResponse = await fetch(putUrl, {
         method: 'PUT',
         headers: {
@@ -162,9 +173,15 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
         body: file,
       });
 
+      console.log('📥 S3 upload response status:', uploadResponse.status, uploadResponse.statusText);
+
       if (!uploadResponse.ok) {
-        throw new Error('Failed to upload file to S3');
+        const errorText = await uploadResponse.text().catch(() => 'Unknown error');
+        console.error('❌ S3 upload failed:', errorText);
+        throw new Error(`Failed to upload file to S3: ${uploadResponse.status} ${errorText.substring(0, 100)}`);
       }
+      
+      console.log('✅ File uploaded to S3 successfully');
 
       // 3. Уведомляем родительский компонент
       setUploadedFile({
@@ -176,9 +193,14 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
 
       onFileUploaded?.(objectKey, file.name, fileType);
     } catch (err) {
+      console.error('❌ File upload error:', err);
+      console.error('❌ Error details:', {
+        name: err.name,
+        message: err.message,
+        stack: err.stack?.substring(0, 200),
+      });
       const errorMessage = err.message || 'Ошибка загрузки файла';
       setError(errorMessage);
-      console.error('File upload error:', err);
       // Уведомляем родительский компонент об ошибке
       onFileUploaded?.(null);
     } finally {
