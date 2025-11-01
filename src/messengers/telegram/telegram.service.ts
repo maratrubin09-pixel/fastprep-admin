@@ -268,6 +268,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       let senderUsername = null;
       let senderFirstName = null;
       let senderLastName = null;
+      let peerIdData = null; // Для сохранения telegramPeerId
 
       this.logger.log(`🔍 DEBUG: Starting chat info extraction - chatId: ${chatId}, senderId: ${senderId || 'null'}`);
 
@@ -366,6 +367,45 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
                 if (foundDialog && foundDialog.entity) {
                   entity = foundDialog.entity;
                   this.logger.log(`✅ Method 2c - Found in dialogs: className=${(entity as any).className || 'unknown'}`);
+                  
+                  // Создаем telegramPeerId из найденного entity
+                  if (!peerIdData) {
+                    if ((entity as any).className === 'User') {
+                      const userId = (entity as any).id;
+                      const accessHash = (entity as any).accessHash || '0';
+                      if (userId) {
+                        const serialized: any = {
+                          _: 'InputPeerUser',
+                          userId: String(userId),
+                          accessHash: String(accessHash)
+                        };
+                        peerIdData = JSON.stringify(serialized);
+                        this.logger.log(`✅ Method 2c - Created telegramPeerId from dialog entity: ${peerIdData}`);
+                      }
+                    } else if ((entity as any).className === 'Chat') {
+                      const chatId_ = (entity as any).id;
+                      if (chatId_) {
+                        const serialized: any = {
+                          _: 'InputPeerChat',
+                          chatId: String(chatId_)
+                        };
+                        peerIdData = JSON.stringify(serialized);
+                        this.logger.log(`✅ Method 2c - Created telegramPeerId from dialog entity: ${peerIdData}`);
+                      }
+                    } else if ((entity as any).className === 'Channel') {
+                      const channelId = (entity as any).id;
+                      const accessHash = (entity as any).accessHash || '0';
+                      if (channelId) {
+                        const serialized: any = {
+                          _: 'InputPeerChannel',
+                          channelId: String(channelId),
+                          accessHash: String(accessHash)
+                        };
+                        peerIdData = JSON.stringify(serialized);
+                        this.logger.log(`✅ Method 2c - Created telegramPeerId from dialog entity: ${peerIdData}`);
+                      }
+                    }
+                  }
                 } else {
                   this.logger.warn(`⚠️ Method 2c - Chat ${chatId} not found in dialogs`);
                 }
@@ -490,15 +530,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // Сериализуем InputPeer для последующего использования при отправке
       // Берем accessHash напрямую из message._sender (доступен для входящих сообщений)
       // Если не получилось, пытаемся получить entity напрямую
-      let peerIdData = null;
+      // peerIdData уже объявлен выше (строка 271), может быть установлен в Method 2c
       
-      // Способ 1: Попробуем из message._sender (быстрее)
-      try {
-        const sender = message._sender;
-        this.logger.debug(`🔍 Checking message._sender: ${sender ? `id=${sender.id}, hasAccessHash=${!!sender.accessHash}` : 'null'}`);
-        
-        if (sender && sender.id) {
-          if (sender.accessHash) {
+      // Способ 1: Попробуем из message._sender (быстрее, наиболее надежный)
+      if (!peerIdData) {
+        try {
+          const sender = message._sender;
+          this.logger.debug(`🔍 Checking message._sender: ${sender ? `id=${sender.id}, hasAccessHash=${!!sender.accessHash}` : 'null'}`);
+          
+          if (sender && sender.id) {
+            if (sender.accessHash) {
           const serialized: any = {
             _: 'InputPeerUser',
             userId: String(sender.id),
@@ -511,8 +552,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn(`⚠️ message._sender exists but no accessHash for userId=${sender.id}`);
           }
         }
-      } catch (error) {
-        this.logger.warn(`⚠️ Could not extract InputPeer from message._sender: ${error}`);
+        } catch (error) {
+          this.logger.warn(`⚠️ Could not extract InputPeer from message._sender: ${error}`);
+        }
       }
       
       // Способ 2: Если не получилось из _sender, получаем entity напрямую через getEntity
