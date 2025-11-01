@@ -55,27 +55,54 @@ export class UploadsController {
   @UseGuards(PepGuard)
   @RequirePerm('inbox.send_message')
   async presign(@Body() dto: PresignRequestDto) {
-    // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
-    const isAllowed = 
-      ALLOWED_TYPES.includes(dto.contentType) || 
-      dto.contentType.startsWith('image/') || 
-      dto.contentType.startsWith('video/') || 
-      dto.contentType.startsWith('audio/');
-    
-    if (!isAllowed) {
+    try {
+      // Валидация входных данных
+      if (!dto.threadId || !dto.filename || !dto.contentType || typeof dto.contentType !== 'string') {
+        throw new BadRequestException({ 
+          code: 'INVALID_REQUEST', 
+          message: 'Missing required fields: threadId, filename, contentType' 
+        });
+      }
+
+      // Нормализуем contentType (убираем пробелы, приводим к нижнему регистру для сравнения)
+      const contentType = dto.contentType.trim().toLowerCase();
+      
+      // Нормализуем список разрешенных типов для сравнения
+      const normalizedAllowedTypes = ALLOWED_TYPES.map(t => t.toLowerCase());
+
+      // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
+      const isAllowed = 
+        normalizedAllowedTypes.includes(contentType) || 
+        contentType.startsWith('image/') || 
+        contentType.startsWith('video/') || 
+        contentType.startsWith('audio/');
+      
+      if (!isAllowed) {
+        throw new BadRequestException({ 
+          code: 'TYPE_NOT_ALLOWED', 
+          message: `Content type not allowed: ${contentType}. Allowed: images, videos, audio, and documents` 
+        });
+      }
+      if (dto.size > MAX_SIZE) {
+        throw new BadRequestException({ code: 'SIZE_EXCEEDED', message: 'File size exceeds limit' });
+      }
+
+      const prefix = `inbox/${dto.threadId}/`;
+      const result = await this.s3.createPresignedPut(prefix, dto.filename, contentType, 600);
+
+      return result;
+    } catch (error: any) {
+      // Если это уже BadRequestException, пробрасываем дальше
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      // Для других ошибок логируем и возвращаем понятное сообщение
+      console.error('Error in presign endpoint:', error);
       throw new BadRequestException({ 
-        code: 'TYPE_NOT_ALLOWED', 
-        message: `Content type not allowed: ${dto.contentType}. Allowed: images, videos, audio, and documents` 
+        code: 'SERVER_ERROR', 
+        message: error.message || 'Failed to generate upload URL' 
       });
     }
-    if (dto.size > MAX_SIZE) {
-      throw new BadRequestException({ code: 'SIZE_EXCEEDED', message: 'File size exceeds limit' });
-    }
-
-    const prefix = `inbox/${dto.threadId}/`;
-    const result = await this.s3.createPresignedPut(prefix, dto.filename, dto.contentType, 600);
-
-    return result;
   }
 
   /**

@@ -108,8 +108,14 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
       });
 
       if (!presignResponse.ok) {
-        const errorData = await presignResponse.json();
-        throw new Error(errorData.message || 'Failed to get upload URL');
+        let errorData;
+        try {
+          errorData = await presignResponse.json();
+        } catch (e) {
+          errorData = { message: `Server error: ${presignResponse.status} ${presignResponse.statusText}` };
+        }
+        const errorMessage = errorData.message || errorData.code || `Failed to get upload URL (${presignResponse.status})`;
+        throw new Error(errorMessage);
       }
 
       const { putUrl, objectKey } = await presignResponse.json();
@@ -137,8 +143,11 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
 
       onFileUploaded?.(objectKey, file.name, file.type);
     } catch (err) {
-      setError(err.message || 'Ошибка загрузки файла');
+      const errorMessage = err.message || 'Ошибка загрузки файла';
+      setError(errorMessage);
       console.error('File upload error:', err);
+      // Уведомляем родительский компонент об ошибке
+      onFileUploaded?.(null);
     } finally {
       setUploading(false);
     }
@@ -184,7 +193,19 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
             )}
           </IconButton>
           {error && (
-            <Typography variant="caption" color="error" sx={{ ml: 1 }}>
+            <Typography 
+              variant="caption" 
+              color="error" 
+              sx={{ 
+                ml: 1, 
+                display: 'block',
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+              title={error}
+            >
               {error}
             </Typography>
           )}

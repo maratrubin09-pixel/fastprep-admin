@@ -324,14 +324,15 @@ export class InboxService {
     external_message_id?: string;
     sender_name?: string;
     metadata?: any;
+    object_key?: string;
   }): Promise<any> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
       const result = await client.query(
-        `INSERT INTO messages (conversation_id, direction, text, external_message_id, sender_name, metadata, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        `INSERT INTO messages (conversation_id, direction, text, external_message_id, sender_name, metadata, object_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
          RETURNING *`,
         [
           params.conversation_id,
@@ -340,6 +341,7 @@ export class InboxService {
           params.external_message_id || null,
           params.sender_name || null,
           params.metadata ? JSON.stringify(params.metadata) : null,
+          params.object_key || null,
         ]
       );
 
