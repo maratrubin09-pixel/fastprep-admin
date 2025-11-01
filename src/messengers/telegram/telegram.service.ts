@@ -345,15 +345,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               });
               this.logger.log(`🔍 DEBUG: Method 2b - Created InputPeerUser from peerId`);
               
-              // Сохраняем в peerIdData сразу
-              if (!peerIdData) {
+              // Сохраняем в peerIdData только если есть валидный accessHash
+              if (!peerIdData && message.peerId.accessHash && message.peerId.accessHash !== '0') {
                 const serialized: any = {
                   _: 'InputPeerUser',
                   userId: String(message.peerId.userId),
-                  accessHash: String(message.peerId.accessHash || '0')
+                  accessHash: String(message.peerId.accessHash)
                 };
                 peerIdData = JSON.stringify(serialized);
                 this.logger.log(`✅ Method 2b - Saved telegramPeerId from peerId: ${peerIdData}`);
+              } else if (!message.peerId.accessHash || message.peerId.accessHash === '0') {
+                this.logger.warn(`⚠️ Method 2b - peerId.accessHash is missing or '0', will try getDialogs for full entity`);
               }
             } catch (e) {
               this.logger.debug(`⚠️ Method 2b - Could not create InputPeerUser from peerId: ${e}`);

@@ -35,7 +35,7 @@ services:
       - key: S3_ENDPOINT
         sync: false
       - key: S3_REGION
-        value: auto
+        value: nyc3
       - key: S3_BUCKET
         sync: false
       - key: S3_ACCESS_KEY_ID
@@ -119,6 +119,16 @@ services:
         value: 300
       - key: FAIL_ALERT_COOLDOWN_SEC
         value: 3600
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: nyc3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
 
   # TG Adapter (separate service with persistent disk)
   # ВРЕМЕННО ОТКЛЮЧЕН - будет создан отдельно
