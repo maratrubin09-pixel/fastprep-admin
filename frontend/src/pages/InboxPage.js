@@ -821,7 +821,7 @@ const InboxPage = () => {
                               wordBreak: 'break-all',
                               overflowWrap: 'anywhere',
                               '& a': {
-                                color: '#1976d2', // Синий цвет ссылок
+                                color: msg.direction === 'out' ? '#F06292' : '#9C27B0', // Розовый для исходящих, фиолетовый для входящих
                                 textDecoration: 'underline',
                                 wordBreak: 'break-all',
                                 overflowWrap: 'anywhere',
