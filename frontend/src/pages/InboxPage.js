@@ -346,24 +346,33 @@ const InboxPage = () => {
         
         // Автопрокрутка для новых сообщений в активном чате
         if (isSelected) {
-          // Используем два таймаута для гарантии обновления DOM
-          setTimeout(() => {
-            if (messagesContainerRef.current) {
-              const container = messagesContainerRef.current;
-              container.scrollTop = container.scrollHeight;
-            } else if (messagesEndRef.current) {
-              messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-            }
-          }, 100); // Первая попытка через 100ms
-          
-          setTimeout(() => {
-            if (messagesContainerRef.current) {
-              const container = messagesContainerRef.current;
-              container.scrollTop = container.scrollHeight;
-            } else if (messagesEndRef.current) {
-              messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-            }
-          }, 300); // Вторая попытка через 300ms для надежности
+          // Используем несколько попыток для гарантии обновления DOM
+          // Важно: используем requestAnimationFrame для синхронизации с рендерингом
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                const container = messagesContainerRef.current;
+                const scrollTo = container.scrollHeight;
+                container.scrollTop = scrollTo;
+                // Также пробуем через scrollIntoView для надежности
+                if (messagesEndRef.current) {
+                  messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+              } else if (messagesEndRef.current) {
+                messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+              }
+            }, 50);
+            
+            // Вторая попытка через 200ms для гарантии
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                const container = messagesContainerRef.current;
+                container.scrollTop = container.scrollHeight;
+              } else if (messagesEndRef.current) {
+                messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+              }
+            }, 200);
+          });
         }
       });
 
@@ -418,25 +427,32 @@ const InboxPage = () => {
     }
   }, [selectedThread]);
 
-  // Умная автопрокрутка - всегда для новых сообщений, или если пользователь уже внизу
+  // Умная автопрокрутка - прокручиваем только если пользователь уже внизу
+  // НЕ прокручиваем если пользователь прокрутил вверх (чтобы не мешать читать старые сообщения)
   useEffect(() => {
-    if (!messagesContainerRef.current || messages.length === 0) return;
+    if (!messagesContainerRef.current || messages.length === 0 || !selectedThread) return;
 
     const container = messagesContainerRef.current;
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+    const scrollHeight = container.scrollHeight;
+    const scrollTop = container.scrollTop;
+    const clientHeight = container.clientHeight;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 150; // Порог 150px
 
-    // Прокручиваем если пользователь уже внизу (увеличили порог до 200px)
+    // Прокручиваем только если пользователь уже внизу (не мешаем чтению старых сообщений)
     if (isNearBottom && messagesEndRef.current) {
-      // Используем requestAnimationFrame для гарантии обновления DOM
       requestAnimationFrame(() => {
         setTimeout(() => {
-          if (messagesEndRef.current) {
+          if (messagesEndRef.current && messagesContainerRef.current) {
+            // Используем прямой scrollTop для более надежной прокрутки
+            const container = messagesContainerRef.current;
+            container.scrollTop = container.scrollHeight;
+            // Дополнительно используем scrollIntoView как fallback
             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
           }
-        }, 50);
+        }, 100);
       });
     }
-  }, [messages]);
+  }, [messages, selectedThread]);
 
   // Проверка, нужно ли показать кнопку "Прокрутить вниз"
   useEffect(() => {
