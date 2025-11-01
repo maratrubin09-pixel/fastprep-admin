@@ -248,6 +248,12 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  // Debug: логируем состояние компонента
+  React.useEffect(() => {
+    console.log('🎨 FileUpload render - uploadedFile:', uploadedFile);
+    console.log('🎨 FileUpload render - resetKey:', resetKey);
+  }, [uploadedFile, resetKey]);
+
   return (
     <Box>
       {!uploadedFile ? (

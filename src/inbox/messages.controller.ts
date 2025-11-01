@@ -127,7 +127,12 @@ export class MessagesController {
     console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
 
     // Возвращаем 201 Created с полными данными сообщения
-    return message;
+    // Явно добавляем object_key и objectKey для совместимости с frontend
+    return {
+      ...message,
+      object_key: message.object_key,
+      objectKey: message.object_key, // camelCase для совместимости
+    };
   }
 
   /**
