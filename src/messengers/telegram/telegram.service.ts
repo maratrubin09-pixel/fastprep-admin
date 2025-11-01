@@ -132,6 +132,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.logger.log(`📨 New incoming message received from chat ${message.chatId}`);
+      
+      // 🔍 ДИАГНОСТИКА: Логируем исходный message от Telegram API
+      this.logger.log(`🔍 DEBUG: Raw message structure - chatId: ${message.chatId}, senderId: ${message.senderId?.userId || 'null'}`);
+      this.logger.log(`🔍 DEBUG: message._sender exists: ${!!message._sender}`);
+      if (message._sender) {
+        this.logger.log(`🔍 DEBUG: message._sender structure: ${JSON.stringify({
+          firstName: message._sender.firstName || null,
+          lastName: message._sender.lastName || null,
+          username: message._sender.username || null,
+          phone: message._sender.phone || null,
+          className: message._sender.className || null,
+        })}`);
+      }
+      this.logger.log(`🔍 DEBUG: this.client exists: ${!!this.client}, isReady: ${this.isReady}`);
+      
       await this.processIncomingMessage(message);
     } catch (error) {
       this.logger.error('❌ Error handling new message:', error);
@@ -245,7 +260,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         text = '[Media]';
       }
 
-      // Get chat info
+      // Get chat info - улучшенная логика с приоритетами
       let chatTitle = 'Unknown';
       let senderName = 'Unknown';
       let senderPhone = null;
@@ -253,50 +268,147 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       let senderFirstName = null;
       let senderLastName = null;
 
-      if (this.client) {
+      this.logger.log(`🔍 DEBUG: Starting chat info extraction - chatId: ${chatId}, senderId: ${senderId || 'null'}`);
+
+      // Способ 1: Попробуем получить из message._sender (самый быстрый)
+      this.logger.log(`🔍 DEBUG: Method 1 - Checking message._sender...`);
+      try {
+        const sender = message._sender;
+        this.logger.log(`🔍 DEBUG: Method 1 - message._sender value: ${sender ? 'exists' : 'null/undefined'}`);
+        if (sender) {
+          senderFirstName = sender.firstName || null;
+          senderLastName = sender.lastName || null;
+          senderUsername = sender.username || null;
+          senderPhone = sender.phone || null;
+          senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone || 'Unknown';
+          
+          this.logger.log(`🔍 DEBUG: Method 1 - Extracted: firstName=${senderFirstName}, lastName=${senderLastName}, username=${senderUsername}, phone=${senderPhone}, senderName=${senderName}`);
+          
+          if (senderName !== 'Unknown') {
+            chatTitle = senderName;
+            this.logger.log(`✅ Got sender info from message._sender: ${senderName}`);
+          } else {
+            this.logger.log(`⚠️ Method 1 - senderName is still Unknown`);
+          }
+        } else {
+          this.logger.log(`⚠️ Method 1 - message._sender is null/undefined`);
+        }
+      } catch (error) {
+        this.logger.warn(`❌ Method 1 - Could not extract from message._sender: ${error}`);
+      }
+
+      // Способ 2: Если не получили, пробуем через getEntity для chatId
+      if ((chatTitle === 'Unknown' || senderName === 'Unknown') && this.client) {
+        this.logger.log(`🔍 DEBUG: Method 2 - Calling getEntity for chatId: ${chatId}`);
         try {
           const entity = await this.client.getEntity(chatId);
-          chatTitle = (entity as any).title || (entity as any).firstName || 'Unknown';
+          this.logger.log(`🔍 DEBUG: Method 2 - getEntity succeeded, entity className: ${(entity as any).className || 'unknown'}`);
+          const entityTitle = (entity as any).title || (entity as any).firstName || null;
+          const entityFirstName = (entity as any).firstName || null;
+          const entityLastName = (entity as any).lastName || null;
+          const entityUsername = (entity as any).username || null;
+          const entityPhone = (entity as any).phone || null;
+          
+          this.logger.log(`🔍 DEBUG: Method 2 - Entity data: title=${entityTitle}, firstName=${entityFirstName}, lastName=${entityLastName}, username=${entityUsername}, phone=${entityPhone}`);
           
           // Если это личный чат (User), сохраняем информацию о пользователе
           if ((entity as any).className === 'User') {
-            senderFirstName = (entity as any).firstName || null;
-            senderLastName = (entity as any).lastName || null;
-            senderUsername = (entity as any).username || null;
-            senderPhone = (entity as any).phone || null;
-            senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || 'Unknown';
-            chatTitle = senderName; // Для личных чатов используем имя отправителя
-          }
-        } catch (error) {
-          this.logger.warn(`Could not fetch chat info for ${chatId}`);
-        }
-
-        // Если senderId есть, но не получили информацию из chat entity, попробуем получить отдельно
-        if (senderId && (senderName === 'Unknown' || chatTitle === 'Unknown')) {
-          try {
-            const sender = await this.client.getEntity(senderId);
-            senderFirstName = (sender as any).firstName || null;
-            senderLastName = (sender as any).lastName || null;
-            senderUsername = (sender as any).username || null;
-            senderPhone = (sender as any).phone || null;
-            senderName = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || 'Unknown';
+            // Используем только если еще не получили данные
+            if (!senderFirstName) senderFirstName = entityFirstName;
+            if (!senderLastName) senderLastName = entityLastName;
+            if (!senderUsername) senderUsername = entityUsername;
+            if (!senderPhone) senderPhone = entityPhone;
             
-            // Обновляем chatTitle из senderName, если он был "Unknown"
-            if (chatTitle === 'Unknown' && senderName !== 'Unknown') {
-              chatTitle = senderName;
+            const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone;
+            if (name && senderName === 'Unknown') {
+              senderName = name;
+              chatTitle = name;
+            } else if (entityTitle && chatTitle === 'Unknown') {
+              chatTitle = entityTitle;
             }
-            
-            this.logger.log(`✅ Extracted sender info: ${senderName} (@${senderUsername || 'N/A'}, ${senderPhone || 'N/A'})`);
-          } catch (error) {
-            this.logger.warn(`Could not fetch sender info for ${senderId}: ${error}`);
+          } else if (entityTitle && chatTitle === 'Unknown') {
+            // Для групповых чатов используем title
+            chatTitle = entityTitle;
           }
+          
+          this.logger.log(`✅ Got entity info: chatTitle=${chatTitle}, senderName=${senderName}`);
+        } catch (error: any) {
+          this.logger.warn(`❌ Method 2 - Could not fetch chat info for ${chatId}: ${error.message || error}`);
+          this.logger.warn(`❌ Method 2 - Error details: ${JSON.stringify({ name: error.name, message: error.message, stack: error.stack?.substring(0, 200) })}`);
         }
-        
-        // Если chatTitle все еще "Unknown", но у нас есть информация о sender, используем ее
-        if (chatTitle === 'Unknown' && senderName !== 'Unknown') {
-          chatTitle = senderName;
+      } else {
+        if (!this.client) {
+          this.logger.warn(`⚠️ Method 2 - Skipped: this.client is null/undefined`);
+        } else {
+          this.logger.log(`⚠️ Method 2 - Skipped: chatTitle=${chatTitle}, senderName=${senderName} (already resolved)`);
         }
       }
+
+      // Способ 3: Если senderId есть, но не получили информацию, пробуем получить sender отдельно
+      if (senderId && (senderName === 'Unknown' || chatTitle === 'Unknown') && this.client) {
+        this.logger.log(`🔍 DEBUG: Method 3 - Calling getEntity for senderId: ${senderId}`);
+        try {
+          const sender = await this.client.getEntity(senderId);
+          this.logger.log(`🔍 DEBUG: Method 3 - getEntity succeeded, sender className: ${(sender as any).className || 'unknown'}`);
+          const fetchedFirstName = (sender as any).firstName || null;
+          const fetchedLastName = (sender as any).lastName || null;
+          const fetchedUsername = (sender as any).username || null;
+          const fetchedPhone = (sender as any).phone || null;
+          
+          this.logger.log(`🔍 DEBUG: Method 3 - Sender data: firstName=${fetchedFirstName}, lastName=${fetchedLastName}, username=${fetchedUsername}, phone=${fetchedPhone}`);
+          
+          // Используем только если еще не получили
+          if (!senderFirstName) senderFirstName = fetchedFirstName;
+          if (!senderLastName) senderLastName = fetchedLastName;
+          if (!senderUsername) senderUsername = fetchedUsername;
+          if (!senderPhone) senderPhone = fetchedPhone;
+          
+          const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone;
+          if (name && senderName === 'Unknown') {
+            senderName = name;
+            if (chatTitle === 'Unknown') {
+              chatTitle = senderName;
+            }
+          }
+          
+          this.logger.log(`✅ Extracted sender info separately: ${senderName} (@${senderUsername || 'N/A'}, ${senderPhone || 'N/A'})`);
+        } catch (error: any) {
+          this.logger.warn(`❌ Method 3 - Could not fetch sender info for ${senderId}: ${error.message || error}`);
+          this.logger.warn(`❌ Method 3 - Error details: ${JSON.stringify({ name: error.name, message: error.message, stack: error.stack?.substring(0, 200) })}`);
+        }
+      } else {
+        if (!senderId) {
+          this.logger.log(`⚠️ Method 3 - Skipped: senderId is null/undefined`);
+        } else if (!this.client) {
+          this.logger.warn(`⚠️ Method 3 - Skipped: this.client is null/undefined`);
+        } else {
+          this.logger.log(`⚠️ Method 3 - Skipped: chatTitle=${chatTitle}, senderName=${senderName} (already resolved)`);
+        }
+      }
+      
+      // Способ 4: Fallback - используем username, phone или external_chat_id если все еще Unknown
+      if (chatTitle === 'Unknown' && senderName === 'Unknown') {
+        if (senderUsername) {
+          chatTitle = `@${senderUsername}`;
+          senderName = `@${senderUsername}`;
+        } else if (senderPhone) {
+          chatTitle = senderPhone;
+          senderName = senderPhone;
+        } else if (chatId) {
+          chatTitle = `Chat ${chatId}`;
+          senderName = `Chat ${chatId}`;
+        }
+        this.logger.log(`⚠️ Using fallback name: ${chatTitle}`);
+      }
+      
+      // Финальная проверка: если chatTitle все еще Unknown, но senderName есть
+      if (chatTitle === 'Unknown' && senderName !== 'Unknown') {
+        chatTitle = senderName;
+        this.logger.log(`✅ Final check - Updated chatTitle from senderName: ${chatTitle}`);
+      }
+      
+      // 🔍 ДИАГНОСТИКА: Логируем финальное состояние перед передачей в findOrCreateThread
+      this.logger.log(`🔍 DEBUG: Final chat info before findOrCreateThread: chatTitle=${chatTitle}, senderName=${senderName}, firstName=${senderFirstName}, lastName=${senderLastName}, username=${senderUsername}, phone=${senderPhone}`);
 
       // Сериализуем InputPeer для последующего использования при отправке
       // Берем accessHash напрямую из message._sender (доступен для входящих сообщений)
@@ -468,21 +580,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           }
           
           this.logger.log(`✅ Reconstructed InputPeer successfully`);
+          return entity;
         } catch (error) {
-          this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
-          entity = await this.client.getEntity(chatId);
+          this.logger.warn(`⚠️ Failed to reconstruct InputPeer (${error}), falling back to getEntity for ${chatId}`);
         }
-      } else {
-        // Fallback: пытаемся получить entity напрямую
-        this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
-      try {
-        entity = await this.client.getEntity(chatId);
-        this.logger.log(`✅ Successfully got entity via getEntity`);
-      } catch (getEntityError: any) {
-        this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
-        throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
       }
-    }
+      
+      // Fallback: пытаемся получить entity напрямую
+      if (!entity) {
+        this.logger.log(`🔍 No saved InputPeer (telegramPeerId=${telegramPeerId || 'null'}), trying getEntity for ${chatId}`);
+        try {
+          entity = await this.client.getEntity(chatId);
+          this.logger.log(`✅ Successfully got entity via getEntity`);
+        } catch (getEntityError: any) {
+          this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
+          throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+        }
+      }
     
     if (!entity) {
       throw new Error('Failed to resolve entity for sending message');
@@ -547,13 +661,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let tempFilePath: string | null = null;
 
     try {
-      this.logger.log(`📤 Sending message with file to chat ${chatId}, objectKey: ${objectKey}`);
+      this.logger.log(`📤 Starting sendMessageWithFile: chatId=${chatId}, objectKey=${objectKey}, hasPeerId=${!!telegramPeerId}`);
       
+      // Проверяем что objectKey валидный
+      if (!objectKey || objectKey.trim() === '') {
+        throw new Error('objectKey is empty or invalid');
+      }
+      
+      this.logger.log(`🔍 Resolving entity for chatId=${chatId}...`);
       const entity = await this.resolveEntity(chatId, telegramPeerId);
+      this.logger.log(`✅ Entity resolved successfully`);
 
       // Скачиваем файл из S3 во временную директорию
+      this.logger.log(`📥 Downloading file from S3: ${objectKey}`);
       const fileData = await this.s3Service.getObject(objectKey);
       const buffer = fileData.body;
+      
+      if (!buffer || buffer.length === 0) {
+        throw new Error(`Downloaded file is empty: ${objectKey}`);
+      }
+      
+      this.logger.log(`✅ File downloaded from S3: ${buffer.length} bytes`);
       
       // Получаем MIME тип из метаданных S3 или из ответа getObject
       const contentType = fileData.contentType || 'application/octet-stream';
