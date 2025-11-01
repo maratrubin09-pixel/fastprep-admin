@@ -670,8 +670,46 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           entity = await this.client.getEntity(chatId);
           this.logger.log(`✅ Successfully got entity via getEntity`);
         } catch (getEntityError: any) {
-          this.logger.error(`❌ Failed to get entity via getEntity for ${chatId}: ${getEntityError.message}`);
-          throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+          // Для новых чатов getEntity может не работать - пробуем через getDialogs
+          this.logger.warn(`⚠️ getEntity failed (expected for new chats): ${getEntityError.message}`);
+          this.logger.log(`🔍 Method 2c - Trying getDialogs to find chat ${chatId}...`);
+          try {
+            const dialogs = await this.client.getDialogs({ limit: 200 });
+            const foundDialog = dialogs.find((d: any) => {
+              const dId = d.entity?.id?.toString() || d.id?.toString();
+              return dId === String(chatId);
+            });
+            if (foundDialog && foundDialog.entity) {
+              entity = foundDialog.entity;
+              this.logger.log(`✅ Method 2c - Found in dialogs: className=${(entity as any).className || 'unknown'}`);
+              
+              // Создаем InputPeer из найденного entity
+              if ((entity as any).className === 'User') {
+                entity = new Api.InputPeerUser({
+                  userId: bigInt((entity as any).id),
+                  accessHash: bigInt((entity as any).accessHash || '0'),
+                });
+                this.logger.log(`✅ Created InputPeerUser from dialog entity`);
+              } else if ((entity as any).className === 'Chat') {
+                entity = new Api.InputPeerChat({
+                  chatId: bigInt((entity as any).id),
+                });
+                this.logger.log(`✅ Created InputPeerChat from dialog entity`);
+              } else if ((entity as any).className === 'Channel') {
+                entity = new Api.InputPeerChannel({
+                  channelId: bigInt((entity as any).id),
+                  accessHash: bigInt((entity as any).accessHash || '0'),
+                });
+                this.logger.log(`✅ Created InputPeerChannel from dialog entity`);
+              }
+            } else {
+              this.logger.warn(`⚠️ Method 2c - Chat ${chatId} not found in dialogs`);
+              throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+            }
+          } catch (dialogsError: any) {
+            this.logger.error(`❌ Method 2c - getDialogs failed: ${dialogsError.message || dialogsError}`);
+            throw new Error(`Cannot resolve chat entity: ${getEntityError.message}. Need valid telegramPeerId for this chat.`);
+          }
         }
       }
     
