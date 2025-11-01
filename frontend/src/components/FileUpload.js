@@ -73,7 +73,8 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      onFileUploaded?.(null);
+      // Не вызываем onFileUploaded(null) здесь - родительский компонент сам сбросит attachedFileKey
+      // после успешной отправки сообщения
     }
   }, [resetKey, onFileUploaded]);
 
