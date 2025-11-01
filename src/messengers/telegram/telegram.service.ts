@@ -11,6 +11,7 @@ import * as os from 'os';
 import { Gauge, register } from 'prom-client';
 import { S3Service } from '../../storage/s3.service';
 import { v4 as uuidv4 } from 'uuid';
+import { get } from 'https';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -297,44 +298,120 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`❌ Method 1 - Could not extract from message._sender: ${error}`);
       }
 
-      // Способ 2: Если не получили, пробуем через getEntity для chatId
-      if ((chatTitle === 'Unknown' || senderName === 'Unknown') && this.client) {
-        this.logger.log(`🔍 DEBUG: Method 2 - Calling getEntity for chatId: ${chatId}`);
+      // Способ 2a: Попробуем получить entity из message._entities (доступно в сообщении)
+      if ((chatTitle === 'Unknown' || senderName === 'Unknown') && message._entities) {
+        this.logger.log(`🔍 DEBUG: Method 2a - Checking message._entities...`);
         try {
-          const entity = await this.client.getEntity(chatId);
-          this.logger.log(`🔍 DEBUG: Method 2 - getEntity succeeded, entity className: ${(entity as any).className || 'unknown'}`);
-          const entityTitle = (entity as any).title || (entity as any).firstName || null;
-          const entityFirstName = (entity as any).firstName || null;
-          const entityLastName = (entity as any).lastName || null;
-          const entityUsername = (entity as any).username || null;
-          const entityPhone = (entity as any).phone || null;
-          
-          this.logger.log(`🔍 DEBUG: Method 2 - Entity data: title=${entityTitle}, firstName=${entityFirstName}, lastName=${entityLastName}, username=${entityUsername}, phone=${entityPhone}`);
-          
-          // Если это личный чат (User), сохраняем информацию о пользователе
-          if ((entity as any).className === 'User') {
-            // Используем только если еще не получили данные
-            if (!senderFirstName) senderFirstName = entityFirstName;
-            if (!senderLastName) senderLastName = entityLastName;
-            if (!senderUsername) senderUsername = entityUsername;
-            if (!senderPhone) senderPhone = entityPhone;
-            
-            const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone;
-            if (name && senderName === 'Unknown') {
-              senderName = name;
-              chatTitle = name;
-            } else if (entityTitle && chatTitle === 'Unknown') {
-              chatTitle = entityTitle;
+          for (const entity of message._entities || []) {
+            if (entity.className === 'User' && entity.id) {
+              const userId = String(entity.id);
+              if (userId === String(chatId) || userId === String(senderId)) {
+                this.logger.log(`🔍 DEBUG: Method 2a - Found User entity: id=${entity.id}, firstName=${entity.firstName}, lastName=${entity.lastName}, username=${entity.username}`);
+                if (!senderFirstName && entity.firstName) senderFirstName = entity.firstName;
+                if (!senderLastName && entity.lastName) senderLastName = entity.lastName;
+                if (!senderUsername && entity.username) senderUsername = entity.username;
+                if (!senderPhone && entity.phone) senderPhone = entity.phone;
+                
+                const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone;
+                if (name && senderName === 'Unknown') {
+                  senderName = name;
+                  chatTitle = name;
+                  this.logger.log(`✅ Method 2a - Got info from _entities: ${senderName}`);
+                  break;
+                }
+              }
             }
+          }
+        } catch (error: any) {
+          this.logger.warn(`❌ Method 2a - Error extracting from _entities: ${error.message || error}`);
+        }
+      }
+
+      // Способ 2b: Если не получили, пробуем через getEntity для chatId (может не работать для новых чатов)
+      if ((chatTitle === 'Unknown' || senderName === 'Unknown') && this.client) {
+        this.logger.log(`🔍 DEBUG: Method 2b - Calling getEntity for chatId: ${chatId}`);
+        try {
+          // Попробуем создать InputPeerUser напрямую, если есть доступная информация
+          let entity = null;
+          
+          // Если в message есть peerId с accessHash, используем его
+          if (message.peerId && message.peerId.userId) {
+            try {
+              entity = new Api.InputPeerUser({
+                userId: bigInt(message.peerId.userId),
+                accessHash: bigInt(message.peerId.accessHash || '0'),
+              });
+              this.logger.log(`🔍 DEBUG: Method 2b - Created InputPeerUser from peerId`);
+            } catch (e) {
+              this.logger.debug(`⚠️ Method 2b - Could not create InputPeerUser from peerId: ${e}`);
+            }
+          }
+          
+          // Если не получилось, пробуем стандартный getEntity (может не работать для новых чатов)
+          if (!entity) {
+            try {
+              entity = await this.client.getEntity(chatId);
+              this.logger.log(`🔍 DEBUG: Method 2b - getEntity succeeded, entity className: ${(entity as any).className || 'unknown'}`);
+            } catch (getEntityError: any) {
+              // Для новых чатов getEntity может не работать - это нормально
+              this.logger.warn(`⚠️ Method 2b - getEntity failed (expected for new chats): ${getEntityError.message || getEntityError}`);
+              // Попробуем получить через getDialogs (список диалогов)
+              try {
+                this.logger.log(`🔍 DEBUG: Method 2c - Trying getDialogs to find chat ${chatId}...`);
+                const dialogs = await this.client.getDialogs({ limit: 200 });
+                const foundDialog = dialogs.find((d: any) => {
+                  const dId = d.entity?.id?.toString() || d.id?.toString();
+                  return dId === String(chatId);
+                });
+                if (foundDialog && foundDialog.entity) {
+                  entity = foundDialog.entity;
+                  this.logger.log(`✅ Method 2c - Found in dialogs: className=${(entity as any).className || 'unknown'}`);
+                } else {
+                  this.logger.warn(`⚠️ Method 2c - Chat ${chatId} not found in dialogs`);
+                }
+              } catch (dialogsError: any) {
+                this.logger.warn(`⚠️ Method 2c - getDialogs failed: ${dialogsError.message || dialogsError}`);
+              }
+            }
+          }
+          
+          if (entity) {
+            this.logger.log(`🔍 DEBUG: Method 2b - Processing entity, className: ${(entity as any).className || 'unknown'}`);
+            const entityTitle = (entity as any).title || (entity as any).firstName || null;
+            const entityFirstName = (entity as any).firstName || null;
+            const entityLastName = (entity as any).lastName || null;
+            const entityUsername = (entity as any).username || null;
+            const entityPhone = (entity as any).phone || null;
+            
+            this.logger.log(`🔍 DEBUG: Method 2b - Entity data: title=${entityTitle}, firstName=${entityFirstName}, lastName=${entityLastName}, username=${entityUsername}, phone=${entityPhone}`);
+            
+            // Если это личный чат (User), сохраняем информацию о пользователе
+            if ((entity as any).className === 'User') {
+              // Используем только если еще не получили данные
+              if (!senderFirstName) senderFirstName = entityFirstName;
+              if (!senderLastName) senderLastName = entityLastName;
+              if (!senderUsername) senderUsername = entityUsername;
+              if (!senderPhone) senderPhone = entityPhone;
+            
+              const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || senderUsername || senderPhone;
+              if (name && senderName === 'Unknown') {
+                senderName = name;
+                chatTitle = name;
+              } else if (entityTitle && chatTitle === 'Unknown') {
+                chatTitle = entityTitle;
+              }
           } else if (entityTitle && chatTitle === 'Unknown') {
             // Для групповых чатов используем title
             chatTitle = entityTitle;
           }
           
-          this.logger.log(`✅ Got entity info: chatTitle=${chatTitle}, senderName=${senderName}`);
-        } catch (error: any) {
-          this.logger.warn(`❌ Method 2 - Could not fetch chat info for ${chatId}: ${error.message || error}`);
-          this.logger.warn(`❌ Method 2 - Error details: ${JSON.stringify({ name: error.name, message: error.message, stack: error.stack?.substring(0, 200) })}`);
+            this.logger.log(`✅ Got entity info: chatTitle=${chatTitle}, senderName=${senderName}`);
+          } else {
+            this.logger.warn(`⚠️ Method 2b - Could not get entity (new chat or access denied)`);
+            }
+          } catch (error: any) {
+          this.logger.warn(`❌ Method 2b - Could not fetch chat info for ${chatId}: ${error.message || error}`);
+          this.logger.warn(`❌ Method 2b - Error details: ${JSON.stringify({ name: error.name, message: error.message, stack: error.stack?.substring(0, 200) })}`);
         }
       } else {
         if (!this.client) {
@@ -552,35 +629,35 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       throw new Error('Telegram client not ready');
     }
 
-      let entity;
-      
-      // Если есть сохраненный InputPeer, используем его (самый надежный способ)
-      if (telegramPeerId) {
-        try {
-          const parsed = JSON.parse(telegramPeerId);
-          this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
-          
-          // Воссоздаем InputPeer из сохраненных данных
-          if (parsed._ === 'InputPeerUser') {
-            entity = new Api.InputPeerUser({
-              userId: bigInt(parsed.userId),
-              accessHash: bigInt(parsed.accessHash || '0'),
-            });
-          } else if (parsed._ === 'InputPeerChat') {
-            entity = new Api.InputPeerChat({
-              chatId: bigInt(parsed.chatId),
-            });
-          } else if (parsed._ === 'InputPeerChannel') {
-            entity = new Api.InputPeerChannel({
-              channelId: bigInt(parsed.channelId),
-              accessHash: bigInt(parsed.accessHash || '0'),
-            });
-          } else {
-            throw new Error(`Unknown InputPeer type: ${parsed._}`);
-          }
-          
-          this.logger.log(`✅ Reconstructed InputPeer successfully`);
-          return entity;
+    let entity;
+    
+    // Если есть сохраненный InputPeer, используем его (самый надежный способ)
+    if (telegramPeerId) {
+      try {
+        const parsed = JSON.parse(telegramPeerId);
+        this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
+        
+        // Воссоздаем InputPeer из сохраненных данных
+        if (parsed._ === 'InputPeerUser') {
+          entity = new Api.InputPeerUser({
+            userId: bigInt(parsed.userId),
+            accessHash: bigInt(parsed.accessHash || '0'),
+          });
+        } else if (parsed._ === 'InputPeerChat') {
+          entity = new Api.InputPeerChat({
+            chatId: bigInt(parsed.chatId),
+          });
+        } else if (parsed._ === 'InputPeerChannel') {
+          entity = new Api.InputPeerChannel({
+            channelId: bigInt(parsed.channelId),
+            accessHash: bigInt(parsed.accessHash || '0'),
+          });
+        } else {
+          throw new Error(`Unknown InputPeer type: ${parsed._}`);
+        }
+        
+        this.logger.log(`✅ Reconstructed InputPeer successfully`);
+        return entity;
         } catch (error) {
           this.logger.warn(`⚠️ Failed to reconstruct InputPeer (${error}), falling back to getEntity for ${chatId}`);
         }
