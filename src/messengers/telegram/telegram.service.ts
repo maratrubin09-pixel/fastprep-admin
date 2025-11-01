@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { Gauge, register } from 'prom-client';
 import { S3Service } from '../../storage/s3.service';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -154,74 +155,88 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // Извлекаем текст и медиа из сообщения
       let text = message.message || message.text || '';
       const attachments: any[] = [];
+      let objectKey: string | null = null; // S3 ключ для первого медиафайла
       
       // Обработка медиафайлов
-      if (message.media) {
+      if (message.media && this.client) {
         const media = message.media;
+        let mediaType: string | null = null;
+        let mimeType: string | null = null;
+        let fileName: string | null = null;
+        let caption: string | null = null;
         
-        // Фото
+        // Определяем тип медиа
         if (media.photo || media.className === 'MessageMediaPhoto') {
-          attachments.push({
-            type: 'photo',
-            media: media,
-            caption: media.caption || text || '',
-          });
+          mediaType = 'photo';
+          mimeType = 'image/jpeg'; // Telegram обычно использует JPEG для фото
+          fileName = 'photo.jpg';
+          caption = media.caption || text || '';
           if (!text) text = '📷 Photo';
-        }
-        
-        // Видео
-        if (media.video || media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('video/')) {
-          attachments.push({
-            type: 'video',
-            media: media,
-            caption: media.caption || text || '',
-            mimeType: media.mimeType || 'video/mp4',
-          });
+        } else if (media.video || (media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('video/'))) {
+          mediaType = 'video';
+          mimeType = media.mimeType || 'video/mp4';
+          fileName = media.fileName || 'video.mp4';
+          caption = media.caption || text || '';
           if (!text) text = '🎥 Video';
-        }
-        
-        // Голосовое сообщение
-        if (media.className === 'MessageMediaDocument' && (media.mimeType === 'audio/ogg' || media.mimeType === 'audio/x-voice' || media.voice)) {
-          attachments.push({
-            type: 'voice',
-            media: media,
-            caption: text || '',
-            mimeType: media.mimeType || 'audio/ogg',
-          });
+        } else if (media.className === 'MessageMediaDocument' && (media.mimeType === 'audio/ogg' || media.mimeType === 'audio/x-voice' || media.voice)) {
+          mediaType = 'voice';
+          mimeType = media.mimeType || 'audio/ogg';
+          fileName = 'voice.ogg';
+          caption = text || '';
           if (!text) text = '🎤 Voice message';
-        }
-        
-        // Аудио файл
-        if (media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('audio/') && !media.voice) {
-          attachments.push({
-            type: 'audio',
-            media: media,
-            caption: media.caption || text || '',
-            mimeType: media.mimeType,
-            fileName: media.fileName || 'audio',
-          });
+        } else if (media.className === 'MessageMediaDocument' && media.mimeType?.startsWith('audio/') && !media.voice) {
+          mediaType = 'audio';
+          mimeType = media.mimeType;
+          fileName = media.fileName || 'audio';
+          caption = media.caption || text || '';
           if (!text) text = '🎵 Audio file';
-        }
-        
-        // Документ
-        if (media.className === 'MessageMediaDocument' && !media.mimeType?.startsWith('video/') && !media.mimeType?.startsWith('audio/')) {
-          attachments.push({
-            type: 'document',
-            media: media,
-            caption: media.caption || text || '',
-            mimeType: media.mimeType || 'application/octet-stream',
-            fileName: media.fileName || 'file',
-          });
+        } else if (media.className === 'MessageMediaDocument' && !media.mimeType?.startsWith('video/') && !media.mimeType?.startsWith('audio/')) {
+          mediaType = 'document';
+          mimeType = media.mimeType || 'application/octet-stream';
+          fileName = media.fileName || 'file';
+          caption = media.caption || text || '';
           if (!text) text = '📎 Document';
+        } else if (media.sticker || media.className === 'MessageMediaSticker') {
+          mediaType = 'sticker';
+          mimeType = 'image/webp'; // Stickers обычно в формате WebP
+          fileName = 'sticker.webp';
+          if (!text) text = '😀 Sticker';
         }
         
-        // Стикер
-        if (media.sticker || media.className === 'MessageMediaSticker') {
+        // Сохраняем информацию о медиа в attachments
+        if (mediaType) {
           attachments.push({
-            type: 'sticker',
+            type: mediaType,
             media: media,
+            caption: caption || '',
+            mimeType: mimeType,
+            fileName: fileName,
           });
-          if (!text) text = '😀 Sticker';
+          
+          // Скачиваем и загружаем первый медиафайл в S3
+          try {
+            this.logger.log(`📥 Downloading ${mediaType} from Telegram...`);
+            const buffer = await this.client.downloadMedia(message, {});
+            
+            if (buffer && Buffer.isBuffer(buffer)) {
+              // Генерируем S3 ключ (используем chatId, threadId будет известен после создания thread)
+              // После создания thread можно будет обновить object_key при необходимости
+              const threadPrefix = `inbox/telegram_${chatId}/`;
+              const s3Key = await this.uploadMediaToS3(buffer, threadPrefix, fileName!, mimeType!);
+              
+              if (s3Key) {
+                objectKey = s3Key;
+                this.logger.log(`✅ Media uploaded to S3: ${objectKey}`);
+              } else {
+                this.logger.warn(`⚠️ Failed to upload media to S3`);
+              }
+            } else {
+              this.logger.warn(`⚠️ Downloaded media is not a Buffer: ${typeof buffer}`);
+            }
+          } catch (error: any) {
+            this.logger.error(`❌ Error downloading/uploading media: ${error.message}`);
+            // Не прерываем обработку сообщения, если медиа не удалось скачать
+          }
         }
       }
       
@@ -295,15 +310,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         
         if (sender && sender.id) {
           if (sender.accessHash) {
-            const serialized: any = {
-              _: 'InputPeerUser',
-              userId: String(sender.id),
+          const serialized: any = {
+            _: 'InputPeerUser',
+            userId: String(sender.id),
               accessHash: String(sender.accessHash)
-            };
-            
-            peerIdData = JSON.stringify(serialized);
+          };
+          
+          peerIdData = JSON.stringify(serialized);
             this.logger.log(`✅ Saved InputPeer from message._sender: ${peerIdData}`);
-          } else {
+        } else {
             this.logger.warn(`⚠️ message._sender exists but no accessHash for userId=${sender.id}`);
           }
         }
@@ -380,6 +395,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         chatTitle,
         text,
         attachments,
+        objectKey, // S3 ключ для медиафайла
         timestamp: message.date * 1000,
         telegramPeerId: peerIdData,
         raw: message,
@@ -424,41 +440,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       throw new Error('Telegram client not ready');
     }
 
-    let entity;
-    
-    // Если есть сохраненный InputPeer, используем его (самый надежный способ)
-    if (telegramPeerId) {
-      try {
-        const parsed = JSON.parse(telegramPeerId);
-        this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
-        
-        // Воссоздаем InputPeer из сохраненных данных
-        if (parsed._ === 'InputPeerUser') {
-          entity = new Api.InputPeerUser({
-            userId: bigInt(parsed.userId),
-            accessHash: bigInt(parsed.accessHash || '0'),
-          });
-        } else if (parsed._ === 'InputPeerChat') {
-          entity = new Api.InputPeerChat({
-            chatId: bigInt(parsed.chatId),
-          });
-        } else if (parsed._ === 'InputPeerChannel') {
-          entity = new Api.InputPeerChannel({
-            channelId: bigInt(parsed.channelId),
-            accessHash: bigInt(parsed.accessHash || '0'),
-          });
-        } else {
-          throw new Error(`Unknown InputPeer type: ${parsed._}`);
+      let entity;
+      
+      // Если есть сохраненный InputPeer, используем его (самый надежный способ)
+      if (telegramPeerId) {
+        try {
+          const parsed = JSON.parse(telegramPeerId);
+          this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
+          
+          // Воссоздаем InputPeer из сохраненных данных
+          if (parsed._ === 'InputPeerUser') {
+            entity = new Api.InputPeerUser({
+              userId: bigInt(parsed.userId),
+              accessHash: bigInt(parsed.accessHash || '0'),
+            });
+          } else if (parsed._ === 'InputPeerChat') {
+            entity = new Api.InputPeerChat({
+              chatId: bigInt(parsed.chatId),
+            });
+          } else if (parsed._ === 'InputPeerChannel') {
+            entity = new Api.InputPeerChannel({
+              channelId: bigInt(parsed.channelId),
+              accessHash: bigInt(parsed.accessHash || '0'),
+            });
+          } else {
+            throw new Error(`Unknown InputPeer type: ${parsed._}`);
+          }
+          
+          this.logger.log(`✅ Reconstructed InputPeer successfully`);
+        } catch (error) {
+          this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
+          entity = await this.client.getEntity(chatId);
         }
-        
-        this.logger.log(`✅ Reconstructed InputPeer successfully`);
-      } catch (error) {
-        this.logger.warn(`⚠️ Failed to reconstruct InputPeer, falling back to getEntity: ${error}`);
-        entity = await this.client.getEntity(chatId);
-      }
-    } else {
-      // Fallback: пытаемся получить entity напрямую
-      this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
+      } else {
+        // Fallback: пытаемся получить entity напрямую
+        this.logger.warn(`⚠️ No saved InputPeer, trying getEntity for ${chatId}`);
       try {
         entity = await this.client.getEntity(chatId);
         this.logger.log(`✅ Successfully got entity via getEntity`);
@@ -495,6 +511,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`❌ Failed to send message to ${chatId}:`, error);
       this.logger.error(`Error details: ${error.message || JSON.stringify(error)}`);
       throw error;
+    }
+  }
+
+  /**
+   * Загрузить медиафайл в S3
+   */
+  private async uploadMediaToS3(
+    buffer: Buffer,
+    prefix: string,
+    fileName: string,
+    contentType: string
+  ): Promise<string | null> {
+    try {
+      const key = `${prefix}${uuidv4()}_${fileName}`;
+      
+      await this.s3Service.putObject(key, buffer, contentType);
+      return key;
+    } catch (error: any) {
+      this.logger.error(`❌ Failed to upload media to S3: ${error.message}`);
+      return null;
     }
   }
 

@@ -123,12 +123,14 @@ export class WorkerService implements OnModuleDestroy {
       );
       if (msgRes.rows.length === 0) {
         // Сообщение удалено — помечаем outbox как failed
+        console.error(`❌ Message ${row.message_id} not found in database`);
         await this.markFailed(client, row.id, 'Message not found');
         this.metrics.outboxProcessedTotal.inc({ status: 'failed' });
         return;
       }
 
       const msg = msgRes.rows[0];
+      console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}`);
 
       // Определяем платформу из channel_id и получаем telegram_peer_id
       const convRes = await client.query(
@@ -138,7 +140,7 @@ export class WorkerService implements OnModuleDestroy {
       const channelId = convRes.rows[0]?.channel_id || '';
       const telegramPeerId = convRes.rows[0]?.telegram_peer_id || null;
       const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
-      
+
       console.log(`📤 Processing outbox ${row.id}: platform=${platform}, channelId=${channelId}, hasTelegramPeerId=${!!telegramPeerId}`);
 
       // Вызов соответствующего сервиса
@@ -226,11 +228,11 @@ export class WorkerService implements OnModuleDestroy {
         };
       } else {
         // Обычная текстовая отправка
-        const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
-        return {
-          success: true,
-          externalMessageId: String(result.id),
-        };
+      const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
+      return {
+        success: true,
+        externalMessageId: String(result.id),
+      };
       }
     } catch (error: any) {
       return {

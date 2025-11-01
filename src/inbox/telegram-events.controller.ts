@@ -97,6 +97,7 @@ export class TelegramEventsController {
         text: event.text,
         external_message_id: event.messageId,
         sender_name: event.senderName,
+        object_key: event.objectKey || undefined, // S3 ключ для медиафайла
         metadata: {
           platform: 'telegram',
           chatTitle: event.chatTitle,

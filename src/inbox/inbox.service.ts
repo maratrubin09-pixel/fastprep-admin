@@ -98,12 +98,15 @@ export class InboxService {
         [threadId, senderId, text, objectKey]
       );
       const message = msgRes.rows[0];
+      console.log(`✅ Message created: id=${message.id}, threadId=${threadId}, hasObjectKey=${!!objectKey}, objectKey=${objectKey || 'null'}`);
 
-      await client.query(
+      const outboxRes = await client.query(
         `INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
-         VALUES ($1, $2, 'pending', NOW(), 0, NOW())`,
+         VALUES ($1, $2, 'pending', NOW(), 0, NOW())
+         RETURNING *`,
         [message.id, threadId]
       );
+      console.log(`✅ Outbox entry created: message_id=${message.id}, conversation_id=${threadId}, outbox_id=${outboxRes.rows[0].id}`);
 
       // audit_log (с EP-snapshot — упрощённо)
       await client.query(
@@ -119,9 +122,11 @@ export class InboxService {
       );
 
       await client.query('COMMIT');
+      console.log(`✅ Transaction committed successfully for message ${message.id}`);
       return message;
     } catch (err) {
       await client.query('ROLLBACK');
+      console.error(`❌ Transaction rolled back for message creation:`, err);
       throw err;
     } finally {
       client.release();

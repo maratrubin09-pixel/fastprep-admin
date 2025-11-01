@@ -48,6 +48,14 @@ export class S3Service {
     });
 
     const putUrl = await getSignedUrl(this.client, command, { expiresIn });
+    
+    // Логирование для отладки
+    console.log('🔗 Generated presigned PUT URL:', {
+      key,
+      bucket: this.bucket,
+      endpoint: process.env.S3_ENDPOINT,
+      urlPreview: putUrl.substring(0, 100) + '...',
+    });
 
     return { putUrl, objectKey: key, expiresIn };
   }
@@ -84,6 +92,21 @@ export class S3Service {
       Key: key,
     });
     return getSignedUrl(this.client, command, { expiresIn });
+  }
+
+  /**
+   * Загрузить файл напрямую в S3 (для серверных загрузок)
+   */
+  async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    });
+    
+    await this.client.send(command);
+    console.log(`✅ File uploaded to S3: ${key}`);
   }
 
   /**
