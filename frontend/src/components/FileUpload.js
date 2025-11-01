@@ -165,20 +165,32 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
 
       // 2. Загружаем файл в S3
       console.log('📤 Uploading file to S3...');
-      const uploadResponse = await fetch(putUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': fileType,
-        },
-        body: file,
-      });
+      console.log('📤 PutURL (first 100 chars):', putUrl.substring(0, 100) + '...');
+      
+      try {
+        const uploadResponse = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': fileType,
+          },
+          body: file,
+        });
 
-      console.log('📥 S3 upload response status:', uploadResponse.status, uploadResponse.statusText);
+        console.log('📥 S3 upload response status:', uploadResponse.status, uploadResponse.statusText);
 
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text().catch(() => 'Unknown error');
-        console.error('❌ S3 upload failed:', errorText);
-        throw new Error(`Failed to upload file to S3: ${uploadResponse.status} ${errorText.substring(0, 100)}`);
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text().catch(() => 'Unknown error');
+          console.error('❌ S3 upload failed:', errorText);
+          console.error('❌ Response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+          throw new Error(`Failed to upload file to S3: ${uploadResponse.status} ${uploadResponse.statusText}. ${errorText.substring(0, 200)}`);
+        }
+      } catch (fetchError) {
+        // Обработка сетевых ошибок (CORS, network failure, etc.)
+        console.error('❌ Fetch error during S3 upload:', fetchError);
+        if (fetchError.name === 'TypeError' && fetchError.message.includes('Failed to fetch')) {
+          throw new Error('Network error: Failed to connect to S3. This might be a CORS issue. Check S3 bucket CORS settings.');
+        }
+        throw fetchError;
       }
       
       console.log('✅ File uploaded to S3 successfully');
