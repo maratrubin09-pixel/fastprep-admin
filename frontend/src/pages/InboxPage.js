@@ -520,21 +520,40 @@ const InboxPage = () => {
     const text = messageInputRef.current?.value || messageText;
     console.log('🔍 Frontend sendMessage - text:', text, 'from ref:', messageInputRef.current?.value, 'from state:', messageText);
     
-    if ((!text.trim() && !attachedFileKey) || !selectedThread) return;
+    if ((!text.trim() && !attachedFileKey) || !selectedThread) {
+      console.warn('⚠️ Cannot send message: no text and no file, or no thread selected');
+      return;
+    }
+    
+    // Проверяем, что если есть attachedFileKey, он валидный
+    if (attachedFileKey && !attachedFileKey.startsWith('inbox/')) {
+      console.error('❌ Invalid objectKey format:', attachedFileKey);
+      alert('Ошибка: неправильный формат файла. Попробуйте загрузить файл заново.');
+      return;
+    }
     
     try {
       setSending(true);
       const token = localStorage.getItem('token');
+      const requestBody = {
+        text: text || '', // Пустой текст если только файл
+        objectKey: attachedFileKey || undefined,
+      };
+      
+      console.log('📤 Sending message request:', {
+        threadId: selectedThread.id,
+        text: text || '(empty)',
+        attachedFileKey: attachedFileKey || '(none)',
+        requestBody,
+      });
+      
       const response = await fetch(`${API_URL}/api/inbox/conversations/${selectedThread.id}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          text: text || '', // Пустой текст если только файл
-          objectKey: attachedFileKey || undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
       
       if (!response.ok) {
@@ -1001,6 +1020,7 @@ const InboxPage = () => {
                     threadId={selectedThread.id}
                     resetKey={fileUploadResetKey}
                     onFileUploaded={(objectKey) => {
+                      console.log('📎 FileUpload callback: objectKey=', objectKey);
                       setAttachedFileKey(objectKey);
                       // Если файл удален (objectKey === null), очищаем состояние
                       if (objectKey === null) {

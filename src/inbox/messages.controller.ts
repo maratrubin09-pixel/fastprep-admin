@@ -122,8 +122,9 @@ export class MessagesController {
 
     // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
     console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, objectKey=${dto.objectKey || 'null'}`);
+    console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, textLength: dto.text?.length || 0 }));
     const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
-    console.log(`✅ Outgoing message created successfully: messageId=${message.id}`);
+    console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
 
     // Возвращаем 201 Created с полными данными сообщения
     return message;

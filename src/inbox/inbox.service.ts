@@ -91,14 +91,15 @@ export class InboxService {
     try {
       await client.query('BEGIN');
 
+      console.log(`🔍 About to insert message: threadId=${threadId}, senderId=${senderId}, textLength=${text?.length || 0}, objectKey=${objectKey || 'NULL'}`);
       const msgRes = await client.query(
         `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, delivery_status, created_at, updated_at)
          VALUES ($1, $2, 'out', $3, $4, 'queued', NOW(), NOW())
          RETURNING *`,
-        [threadId, senderId, text, objectKey]
+        [threadId, senderId, text || '', objectKey || null]
       );
       const message = msgRes.rows[0];
-      console.log(`✅ Message created: id=${message.id}, threadId=${threadId}, hasObjectKey=${!!objectKey}, objectKey=${objectKey || 'null'}`);
+      console.log(`✅ Message created: id=${message.id}, threadId=${threadId}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}, textLength=${message.text?.length || 0}`);
 
       const outboxRes = await client.query(
         `INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
@@ -216,10 +217,22 @@ export class InboxService {
           // Обновляем chat_title если:
           // 1. Новое значение не null И не "Unknown" (всегда обновляем лучшее значение)
           // 2. Старое было "Unknown", а новое что-то другое
-          const currentTitle = existingThread.rows[0].chat_title;
+          // 3. Новое значение содержит больше информации (не начинается с "@" или "Chat")
+          const currentTitle = foundThread.chat_title;
+          const newTitle = params.chat_title;
+          
+          // Определяем приоритет имен
+          const getTitlePriority = (title: string | null): number => {
+            if (!title || title === 'Unknown') return 0;
+            if (title.startsWith('Chat ') || title.startsWith('@')) return 1; // Низкий приоритет (fallback)
+            if (title.includes('+') && /^\+?[0-9]+$/.test(title.replace(/\s/g, ''))) return 2; // Телефон
+            return 3; // Полное имя - высокий приоритет
+          };
+          
           const shouldUpdate = 
-            (params.chat_title && params.chat_title !== 'Unknown') ||
-            (currentTitle === 'Unknown' && params.chat_title && params.chat_title !== 'Unknown');
+            (newTitle && newTitle !== 'Unknown' && getTitlePriority(newTitle) > getTitlePriority(currentTitle)) ||
+            (currentTitle === 'Unknown' && newTitle && newTitle !== 'Unknown') ||
+            (newTitle && !newTitle.startsWith('@') && !newTitle.startsWith('Chat ') && currentTitle && (currentTitle.startsWith('@') || currentTitle.startsWith('Chat ')));
           
           if (shouldUpdate || params.chat_title === null) {
             updates.push(`chat_title = $${paramIndex++}`);
