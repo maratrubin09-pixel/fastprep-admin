@@ -1,9 +1,38 @@
-import { Controller, Post, Get, Body, Param, BadRequestException, UseGuards, Res } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, BadRequestException, UseGuards, Res, Req } from '@nestjs/common';
 import { S3Service } from '../storage/s3.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
 import { Response } from 'express';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'video/mp4'];
+// Расширенный список разрешенных типов медиафайлов
+const ALLOWED_TYPES = [
+  // Изображения
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/bmp',
+  'image/svg+xml',
+  // Видео
+  'video/mp4',
+  'video/quicktime', // .mov
+  'video/x-msvideo', // .avi
+  'video/webm',
+  // Аудио
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/ogg',
+  'audio/webm',
+  // Документы
+  'application/pdf',
+  'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.ms-excel', // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 class PresignRequestDto {
@@ -26,8 +55,18 @@ export class UploadsController {
   @UseGuards(PepGuard)
   @RequirePerm('inbox.send_message')
   async presign(@Body() dto: PresignRequestDto) {
-    if (!ALLOWED_TYPES.includes(dto.contentType)) {
-      throw new BadRequestException({ code: 'TYPE_NOT_ALLOWED', message: 'Content type not allowed' });
+    // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
+    const isAllowed = 
+      ALLOWED_TYPES.includes(dto.contentType) || 
+      dto.contentType.startsWith('image/') || 
+      dto.contentType.startsWith('video/') || 
+      dto.contentType.startsWith('audio/');
+    
+    if (!isAllowed) {
+      throw new BadRequestException({ 
+        code: 'TYPE_NOT_ALLOWED', 
+        message: `Content type not allowed: ${dto.contentType}. Allowed: images, videos, audio, and documents` 
+      });
     }
     if (dto.size > MAX_SIZE) {
       throw new BadRequestException({ code: 'SIZE_EXCEEDED', message: 'File size exceeds limit' });
@@ -42,11 +81,12 @@ export class UploadsController {
   /**
    * GET /api/inbox/uploads/download/:key
    * Получить presigned URL для скачивания файла или напрямую скачать файл
+   * Если есть query параметр ?url=true, возвращает JSON с URL вместо редиректа
    */
   @Get('download/:key(*)')
   @UseGuards(PepGuard)
   @RequirePerm('inbox.view')
-  async download(@Param('key') key: string, @Res() res: Response) {
+  async download(@Param('key') key: string, @Req() req: any, @Res() res: Response) {
     // Проверяем, что ключ начинается с inbox/
     if (!key.startsWith('inbox/')) {
       throw new BadRequestException('Invalid file key');
@@ -56,7 +96,12 @@ export class UploadsController {
       // Получаем presigned URL для скачивания
       const downloadUrl = await this.s3.createPresignedGet(key, 300);
       
-      // Редиректим на presigned URL
+      // Если запрос с ?url=true, возвращаем JSON (для изображений в img src)
+      if (req.query?.url === 'true') {
+        return res.json({ url: downloadUrl });
+      }
+      
+      // Иначе редиректим на presigned URL (для скачивания)
       res.redirect(downloadUrl);
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Failed to generate download URL');

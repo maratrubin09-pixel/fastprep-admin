@@ -4,7 +4,18 @@ import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'video/mp4'];
+// Расширенный список разрешенных типов (должен совпадать с uploads.controller.ts)
+const ALLOWED_TYPES = [
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+  'image/heic', 'image/heif', 'image/bmp', 'image/svg+xml',
+  'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm',
+  'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/webm',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 class SendMessageDto {
@@ -88,8 +99,20 @@ export class MessagesController {
         throw new BadRequestException({ code: 'FILE_NOT_FOUND', message: 'Attachment not found in S3' });
       }
 
-      if (head.contentType && !ALLOWED_TYPES.includes(head.contentType)) {
-        throw new BadRequestException({ code: 'TYPE_NOT_ALLOWED', message: 'Attachment type not allowed' });
+      // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
+      const isAllowed = 
+        head.contentType && (
+          ALLOWED_TYPES.includes(head.contentType) || 
+          head.contentType.startsWith('image/') || 
+          head.contentType.startsWith('video/') || 
+          head.contentType.startsWith('audio/')
+        );
+      
+      if (!isAllowed) {
+        throw new BadRequestException({ 
+          code: 'TYPE_NOT_ALLOWED', 
+          message: `Attachment type not allowed: ${head.contentType}` 
+        });
       }
 
       if (head.size && head.size > MAX_SIZE) {

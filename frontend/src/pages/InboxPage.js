@@ -47,7 +47,7 @@ const MediaPreview = ({ objectKey }) => {
 
     // Определяем тип файла по расширению
     const extension = objectKey.split('.').pop()?.toLowerCase();
-    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg'];
     const isImg = imageExtensions.includes(extension || '');
 
     setIsImage(isImg);
@@ -55,13 +55,24 @@ const MediaPreview = ({ objectKey }) => {
     if (isImg) {
       // Получаем presigned URL для изображения через наш backend
       const token = localStorage.getItem('token');
-      const downloadUrl = `${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}`;
+      const downloadUrl = `${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}?url=true`;
       
-      // Создаем URL с токеном для изображения
-      // Backend вернет редирект на presigned URL, но мы можем использовать его напрямую
-      // Для упрощения используем наш endpoint как proxy
-      setImageUrl(`${downloadUrl}?t=${Date.now()}`);
-      setLoading(false);
+      // Запрашиваем presigned URL напрямую
+      fetch(downloadUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+        .then(res => res.json())
+        .then(data => {
+          setImageUrl(data.url);
+        })
+        .catch(err => {
+          console.error('Failed to get image URL:', err);
+          // Fallback - пробуем напрямую через download endpoint
+          setImageUrl(`${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}`);
+        })
+        .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }

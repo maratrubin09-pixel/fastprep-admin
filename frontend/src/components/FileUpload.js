@@ -17,12 +17,35 @@ import {
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
+// Расширенный список поддерживаемых типов
 const ALLOWED_TYPES = {
+  // Изображения
   'image/jpeg': { icon: <ImageIcon />, label: 'Image' },
+  'image/jpg': { icon: <ImageIcon />, label: 'Image' },
   'image/png': { icon: <ImageIcon />, label: 'Image' },
   'image/gif': { icon: <ImageIcon />, label: 'Image' },
+  'image/webp': { icon: <ImageIcon />, label: 'Image' },
+  'image/heic': { icon: <ImageIcon />, label: 'Image' },
+  'image/heif': { icon: <ImageIcon />, label: 'Image' },
+  'image/bmp': { icon: <ImageIcon />, label: 'Image' },
+  'image/svg+xml': { icon: <ImageIcon />, label: 'Image' },
+  // Видео
   'video/mp4': { icon: <VideoFileIcon />, label: 'Video' },
+  'video/quicktime': { icon: <VideoFileIcon />, label: 'Video' },
+  'video/x-msvideo': { icon: <VideoFileIcon />, label: 'Video' },
+  'video/webm': { icon: <VideoFileIcon />, label: 'Video' },
+  // Аудио
+  'audio/mpeg': { icon: <DescriptionIcon />, label: 'Audio' },
+  'audio/mp3': { icon: <DescriptionIcon />, label: 'Audio' },
+  'audio/wav': { icon: <DescriptionIcon />, label: 'Audio' },
+  'audio/ogg': { icon: <DescriptionIcon />, label: 'Audio' },
+  'audio/webm': { icon: <DescriptionIcon />, label: 'Audio' },
+  // Документы
   'application/pdf': { icon: <DescriptionIcon />, label: 'PDF' },
+  'application/msword': { icon: <DescriptionIcon />, label: 'Word' },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { icon: <DescriptionIcon />, label: 'Word' },
+  'application/vnd.ms-excel': { icon: <DescriptionIcon />, label: 'Excel' },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { icon: <DescriptionIcon />, label: 'Excel' },
 };
 
 const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = null }) => {
@@ -46,8 +69,14 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Валидация типа
-    if (!ALLOWED_TYPES[file.type]) {
+    // Валидация типа - разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке документов
+    const isAllowed = 
+      ALLOWED_TYPES[file.type] || 
+      file.type.startsWith('image/') || 
+      file.type.startsWith('video/') || 
+      file.type.startsWith('audio/');
+    
+    if (!isAllowed) {
       setError(`Тип файла не поддерживается: ${file.type}`);
       return;
     }
@@ -134,10 +163,10 @@ const FileUpload = ({ threadId, onFileUploaded, disabled, initialObjectKey = nul
     <Box>
       {!uploadedFile ? (
         <>
-          <input
+            <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/gif,video/mp4,application/pdf"
+            accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
             onChange={handleFileSelect}
             style={{ display: 'none' }}
             disabled={disabled || uploading}
