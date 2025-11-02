@@ -587,7 +587,11 @@ export class InboxService {
     conversations: any[];
     messages: any[];
   }> {
-    const searchTerm = `%${query.toLowerCase()}%`;
+    // Escape special characters for LIKE/ILIKE pattern
+    const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+    const searchTerm = `%${escapedQuery}%`;
+    
+    console.log(`🔍 Search query: "${query}", searchTerm: "${searchTerm}"`);
 
     // Search conversations by title, sender name, phone, username
     const conversationsQuery = `
@@ -597,14 +601,14 @@ export class InboxService {
         (deleted_at IS NULL OR is_deleted = false OR is_deleted IS NULL)
         AND (is_archived = false OR is_archived IS NULL)
         AND (
-          LOWER(c.chat_title) LIKE $1 OR
-          LOWER(c.custom_name) LIKE $1 OR
-          LOWER(c.sender_first_name) LIKE $1 OR
-          LOWER(c.sender_last_name) LIKE $1 OR
-          LOWER(COALESCE(c.sender_first_name || ' ' || c.sender_last_name, '')) LIKE $1 OR
-          LOWER(c.sender_phone) LIKE $1 OR
-          LOWER(c.sender_username) LIKE $1 OR
-          LOWER(c.external_chat_id) LIKE $1
+          c.chat_title ILIKE $1 OR
+          c.custom_name ILIKE $1 OR
+          c.sender_first_name ILIKE $1 OR
+          c.sender_last_name ILIKE $1 OR
+          COALESCE(c.sender_first_name || ' ' || c.sender_last_name, '') ILIKE $1 OR
+          c.sender_phone ILIKE $1 OR
+          c.sender_username ILIKE $1 OR
+          c.external_chat_id ILIKE $1
         )
       )
       ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
@@ -614,6 +618,7 @@ export class InboxService {
     const conversationsResult = await this.pool.query(conversationsQuery, [searchTerm, limit]);
 
     // Search messages by text content
+    // Check if text column exists and handle NULL values
     const messagesQuery = `
       SELECT DISTINCT m.*, c.chat_title, c.custom_name, c.channel_id, c.id as conversation_id_display
       FROM messages m
@@ -621,13 +626,15 @@ export class InboxService {
       WHERE (
         (c.deleted_at IS NULL OR c.is_deleted = false OR c.is_deleted IS NULL)
         AND (c.is_archived = false OR c.is_archived IS NULL)
-        AND LOWER(m.text) LIKE $1
+        AND m.text IS NOT NULL
+        AND m.text ILIKE $1
       )
       ORDER BY m.created_at DESC
       LIMIT $2
     `;
 
     const messagesResult = await this.pool.query(messagesQuery, [searchTerm, limit]);
+    console.log(`🔍 Found ${messagesResult.rows.length} messages matching "${query}"`);
 
     // Format messages with reply_to_message if column exists
     const hasReplyToColumn = await this.hasReplyToColumn();

@@ -294,8 +294,10 @@ export class MessagesController {
       return { conversations: [], messages: [] };
     }
 
+    console.log(`🔍 Search API called: query="${query}", userId=${userId}`);
     const limitNum = limit ? parseInt(limit, 10) : 50;
     const searchResults = await this.inbox.searchConversationsAndMessages(query.trim(), limitNum);
+    console.log(`🔍 Search API result: ${searchResults.conversations.length} conversations, ${searchResults.messages.length} messages`);
     
     return searchResults;
   }
