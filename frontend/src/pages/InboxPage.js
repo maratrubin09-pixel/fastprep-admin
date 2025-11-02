@@ -233,6 +233,8 @@ const InboxPage = () => {
   const messagesEndRef = useRef(null);
   const selectedThreadRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const prevMessagesLengthRef = useRef(0);
+  const prevSelectedThreadIdRef = useRef(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
@@ -371,36 +373,7 @@ const InboxPage = () => {
           return [...prev, data.message];
         });
         
-        // Автопрокрутка для новых сообщений в активном чате
-        if (isSelected) {
-          // Используем несколько попыток для гарантии обновления DOM
-          // Важно: используем requestAnimationFrame для синхронизации с рендерингом
-          requestAnimationFrame(() => {
-            setTimeout(() => {
-              if (messagesContainerRef.current) {
-                const container = messagesContainerRef.current;
-                const scrollTo = container.scrollHeight;
-                container.scrollTop = scrollTo;
-                // Также пробуем через scrollIntoView для надежности
-                if (messagesEndRef.current) {
-                  messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-                }
-              } else if (messagesEndRef.current) {
-                messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-              }
-            }, 50);
-            
-            // Вторая попытка через 200ms для гарантии
-            setTimeout(() => {
-              if (messagesContainerRef.current) {
-                const container = messagesContainerRef.current;
-                container.scrollTop = container.scrollHeight;
-              } else if (messagesEndRef.current) {
-                messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-              }
-            }, 200);
-          });
-        }
+        // Автопрокрутка будет обработана в useEffect при изменении messages
       });
 
       // Handle message status updates
@@ -445,17 +418,14 @@ const InboxPage = () => {
   useEffect(() => {
     if (selectedThread) {
       fetchMessages(selectedThread.id);
-      // Прокручиваем вниз после загрузки сообщений
-      setTimeout(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
-        }
-      }, 100);
     }
   }, [selectedThread]);
 
-  // Умная автопрокрутка - прокручиваем только если пользователь уже внизу
-  // НЕ прокручиваем если пользователь прокрутил вверх (чтобы не мешать читать старые сообщения)
+  // Автопрокрутка при загрузке сообщений или новых сообщениях
+  // Всегда прокручиваем к последнему сообщению при:
+  // 1. Загрузке сообщений чата впервые (смена selectedThread)
+  // 2. Новых входящих сообщениях (через WebSocket)
+  // Для остальных случаев (пользователь прокрутил вверх) - только если он уже внизу
   useEffect(() => {
     if (!messagesContainerRef.current || messages.length === 0 || !selectedThread) return;
 
@@ -463,20 +433,61 @@ const InboxPage = () => {
     const scrollHeight = container.scrollHeight;
     const scrollTop = container.scrollTop;
     const clientHeight = container.clientHeight;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 150; // Порог 150px
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const isNearBottom = distanceFromBottom < 200; // Порог 200px
 
-    // Прокручиваем только если пользователь уже внизу (не мешаем чтению старых сообщений)
-    if (isNearBottom && messagesEndRef.current) {
+    // Проверяем, загрузились ли сообщения впервые для этого чата
+    const isFirstLoad = prevSelectedThreadIdRef.current !== selectedThread.id;
+    const prevMessagesLength = prevMessagesLengthRef.current;
+    const currentMessagesLength = messages.length;
+    
+    // Новое сообщение добавлено (через WebSocket)
+    const isNewMessage = currentMessagesLength > prevMessagesLength && !isFirstLoad;
+    const lastMessage = messages[messages.length - 1];
+    const isNewIncomingMessage = isNewMessage && lastMessage && lastMessage.direction === 'in';
+
+    // Обновляем refs
+    prevMessagesLengthRef.current = currentMessagesLength;
+    prevSelectedThreadIdRef.current = selectedThread.id;
+
+    // Всегда прокручиваем если:
+    // 1. Это первая загрузка чата
+    // 2. Новое входящее сообщение
+    // 3. Пользователь уже внизу
+    const shouldScroll = isFirstLoad || isNewIncomingMessage || isNearBottom;
+
+    if (shouldScroll && messagesEndRef.current) {
+      // Используем несколько попыток для гарантии
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (messagesEndRef.current && messagesContainerRef.current) {
-            // Используем прямой scrollTop для более надежной прокрутки
+            const container = messagesContainerRef.current;
+            // Для первой загрузки используем 'auto' (быстрее), для остальных - 'smooth'
+            const behavior = isFirstLoad ? 'auto' : 'smooth';
+            // Сначала прокручиваем через scrollTop (более надежно)
+            container.scrollTop = container.scrollHeight;
+            // Затем через scrollIntoView как дополнительная гарантия
+            setTimeout(() => {
+              if (messagesEndRef.current) {
+                messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+              }
+            }, isFirstLoad ? 50 : 50);
+          } else if (messagesEndRef.current) {
+            const behavior = isFirstLoad ? 'auto' : 'smooth';
+            messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+          }
+        }, isFirstLoad ? 150 : 100);
+
+        // Вторая попытка для гарантии
+        setTimeout(() => {
+          if (messagesContainerRef.current) {
             const container = messagesContainerRef.current;
             container.scrollTop = container.scrollHeight;
-            // Дополнительно используем scrollIntoView как fallback
-            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+          } else if (messagesEndRef.current) {
+            const behavior = isFirstLoad ? 'auto' : 'smooth';
+            messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
           }
-        }, 100);
+        }, isFirstLoad ? 400 : 300);
       });
     }
   }, [messages, selectedThread]);
@@ -487,19 +498,42 @@ const InboxPage = () => {
 
     const container = messagesContainerRef.current;
     const checkScroll = () => {
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+      const scrollHeight = container.scrollHeight;
+      const scrollTop = container.scrollTop;
+      const clientHeight = container.clientHeight;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      const isNearBottom = distanceFromBottom < 100; // Порог 100px
       setShowScrollToBottom(!isNearBottom);
     };
 
-    container.addEventListener('scroll', checkScroll);
-    checkScroll(); // Проверяем сразу
+    // Проверяем сразу
+    checkScroll();
 
-    return () => container.removeEventListener('scroll', checkScroll);
+    // Добавляем обработчик scroll
+    container.addEventListener('scroll', checkScroll);
+
+    // Также периодически проверяем (на случай если scroll событие не срабатывает)
+    const intervalId = setInterval(checkScroll, 500);
+
+    return () => {
+      container.removeEventListener('scroll', checkScroll);
+      clearInterval(intervalId);
+    };
   }, [selectedThread, messages]);
 
   const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      const container = messagesContainerRef.current;
+      // Используем прямой scrollTop для более надежной прокрутки
+      container.scrollTop = container.scrollHeight;
+      // Дополнительно используем scrollIntoView
+      setTimeout(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+      }, 50);
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   };
 
