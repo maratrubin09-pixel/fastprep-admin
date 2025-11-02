@@ -146,8 +146,8 @@ export class UploadsController {
     }
 
     try {
-      // Получаем presigned URL для скачивания (3600 секунд = 1 час)
-      const downloadUrl = await this.s3.createPresignedGet(key, 3600);
+      // Получаем presigned URL для скачивания (7200 секунд = 2 часа) - увеличен для надежности
+      const downloadUrl = await this.s3.createPresignedGet(key, 7200);
       
       // Если запрос с ?url=true, возвращаем JSON (для изображений в img src)
       if (req.query?.url === 'true') {

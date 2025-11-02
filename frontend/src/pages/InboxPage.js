@@ -93,7 +93,7 @@ const MediaPreview = ({ objectKey }) => {
         .catch(err => {
           console.error('❌ Failed to get image URL:', err);
           // Fallback - пробуем напрямую через download endpoint
-          setImageUrl(`${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}`);
+          setImageUrl(`${API_URL}/api/inbox/uploads/download/${encodeURIComponent(objectKey)}?url=true`);
         })
         .finally(() => setLoading(false));
     } else {
