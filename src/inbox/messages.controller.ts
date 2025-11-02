@@ -167,12 +167,16 @@ export class MessagesController {
     const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey, dto.replyTo);
     console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
 
-    // Возвращаем 201 Created с полными данными сообщения
+    // Получаем полное сообщение с reply_to_message для отображения
+    const fullMessage = await this.inbox.getMessageWithReply(message.id);
+    console.log(`📋 Full message with reply: hasReplyTo=${!!fullMessage?.reply_to_message}, replyToId=${fullMessage?.reply_to_message?.id || 'null'}`);
+
+    // Возвращаем 201 Created с полными данными сообщения включая reply_to_message
     // Явно добавляем object_key и objectKey для совместимости с frontend
     return {
-      ...message,
-      object_key: message.object_key,
-      objectKey: message.object_key, // camelCase для совместимости
+      ...fullMessage,
+      object_key: fullMessage.object_key,
+      objectKey: fullMessage.object_key, // camelCase для совместимости
     };
   }
 

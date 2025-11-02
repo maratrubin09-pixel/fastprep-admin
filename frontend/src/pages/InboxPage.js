@@ -699,6 +699,15 @@ const InboxPage = () => {
     try {
       setSending(true);
       const token = localStorage.getItem('token');
+      
+      // Детальное логирование состояния replyingTo
+      console.log('🔍 DEBUG replyingTo state:', {
+        replyingTo,
+        replyingToId: replyingTo?.id,
+        replyingToIdType: typeof replyingTo?.id,
+        replyingToIdValue: replyingTo?.id ? replyingTo.id : 'null or undefined'
+      });
+      
       const requestBody = {
         text: text || '', // Пустой текст если только файл
         objectKey: attachedFileKey || undefined,
@@ -709,6 +718,8 @@ const InboxPage = () => {
         threadId: selectedThread.id,
         text: text || '(empty)',
         attachedFileKey: attachedFileKey || '(none)',
+        replyTo: replyingTo?.id || '(none)',
+        replyingToState: replyingTo,
         requestBody,
       });
       
@@ -730,14 +741,26 @@ const InboxPage = () => {
       const newMessage = await response.json();
       console.log('📤 New message from server:', newMessage);
       console.log('📤 Object key:', newMessage.object_key || newMessage.objectKey);
+      console.log('📤 Reply to message:', newMessage.reply_to_message ? {
+        id: newMessage.reply_to_message.id,
+        text: newMessage.reply_to_message.text?.substring(0, 50),
+        sender_name: newMessage.reply_to_message.sender_name
+      } : 'none');
       
       // Немедленно добавляем сообщение в UI со статусом "queued" (отправляется...)
-      // Убеждаемся, что объект имеет правильную структуру
+      // Убеждаемся, что объект имеет правильную структуру, включая reply_to_message
       const messageToAdd = {
         ...newMessage,
         object_key: newMessage.object_key || newMessage.objectKey, // Поддержка обоих вариантов
         direction: 'out',
+        // Сохраняем reply_to_message если оно есть в ответе
+        reply_to_message: newMessage.reply_to_message || null,
       };
+      console.log('📤 Message to add to UI:', {
+        id: messageToAdd.id,
+        hasReplyTo: !!messageToAdd.reply_to_message,
+        replyToId: messageToAdd.reply_to_message?.id
+      });
       setMessages(prev => [...prev, messageToAdd]);
       
       // Показываем успешное уведомление только если есть текст (для файлов может быть пустой)

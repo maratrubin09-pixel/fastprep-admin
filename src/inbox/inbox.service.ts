@@ -523,6 +523,51 @@ export class InboxService {
   }
 
   /**
+   * Get message with reply_to_message joined (for display)
+   */
+  async getMessageWithReply(messageId: string): Promise<any> {
+    const hasReplyToColumn = await this.hasReplyToColumn();
+
+    let result;
+    if (hasReplyToColumn) {
+      result = await this.pool.query(
+        `SELECT 
+          m.*,
+          r.id as reply_to_id,
+          r.text as reply_to_text,
+          r.sender_name as reply_to_sender_name,
+          r.direction as reply_to_direction,
+          r.created_at as reply_to_created_at
+         FROM messages m
+         LEFT JOIN messages r ON m.reply_to = r.id
+         WHERE m.id = $1`,
+        [messageId]
+      );
+    } else {
+      result = await this.pool.query(
+        `SELECT * FROM messages WHERE id = $1`,
+        [messageId]
+      );
+    }
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      ...row,
+      reply_to_message: hasReplyToColumn && row.reply_to_id ? {
+        id: row.reply_to_id,
+        text: row.reply_to_text,
+        sender_name: row.reply_to_sender_name,
+        direction: row.reply_to_direction,
+        created_at: row.reply_to_created_at
+      } : null
+    };
+  }
+
+  /**
    * Проверка существования колонки reply_to в таблице messages
    */
   async hasReplyToColumn(): Promise<boolean> {
