@@ -276,6 +276,31 @@ export class MessagesController {
   }
 
   /**
+   * GET /api/inbox/search
+   * Search conversations and messages by query
+   * @query q Search query string
+   * @query limit Maximum number of results (default: 50)
+   */
+  @Get('search')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async search(@Req() req: any, @Query('q') query?: string, @Query('limit') limit?: string) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    if (!query || query.trim().length === 0) {
+      return { conversations: [], messages: [] };
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    const searchResults = await this.inbox.searchConversationsAndMessages(query.trim(), limitNum);
+    
+    return searchResults;
+  }
+
+  /**
    * POST /api/inbox/conversations/:id/restore
    * Restore a deleted conversation
    */

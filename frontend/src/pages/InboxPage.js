@@ -17,6 +17,7 @@ import {
   Button,
   Stack,
   IconButton,
+  InputAdornment,
 } from '@mui/material';
 import {
   Telegram as TelegramIcon,
@@ -35,6 +36,8 @@ import {
   Cancel as CancelIcon,
   Reply as ReplyIcon,
   Close as CloseIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
 } from '@mui/icons-material';
 import { useMediaQuery as useMuiMediaQuery } from '@mui/material';
 import { io } from 'socket.io-client';
@@ -242,6 +245,10 @@ const InboxPage = () => {
   const [editedName, setEditedName] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null); // Сообщение на которое отвечаем { id, text, sender_name }
+  const [searchQuery, setSearchQuery] = useState(''); // Поисковый запрос
+  const [searchResults, setSearchResults] = useState({ conversations: [], messages: [] }); // Результаты поиска
+  const [isSearching, setIsSearching] = useState(false); // Флаг активного поиска
+  const searchTimeoutRef = useRef(null); // Ref для debounce поиска
   
   // Responsive design
   const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
@@ -652,6 +659,63 @@ const InboxPage = () => {
     }
   };
 
+  const performSearch = async (query) => {
+    if (!query || query.trim().length === 0) {
+      setSearchResults({ conversations: [], messages: [] });
+      setIsSearching(false);
+      return;
+    }
+
+    try {
+      setIsSearching(true);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/inbox/search?q=${encodeURIComponent(query.trim())}&limit=50`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to search');
+      }
+      
+      const data = await response.json();
+      setSearchResults(data);
+    } catch (err) {
+      console.error('Search error:', err);
+      setSearchResults({ conversations: [], messages: [] });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Debounced search effect
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // If search query is empty, clear results
+    if (!searchQuery || searchQuery.trim().length === 0) {
+      setSearchResults({ conversations: [], messages: [] });
+      setIsSearching(false);
+      return;
+    }
+
+    // Set new timeout for search
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(searchQuery);
+    }, 300); // 300ms debounce
+
+    // Cleanup
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
   const fetchMessages = async (threadId) => {
     try {
       const token = localStorage.getItem('token');
@@ -989,13 +1053,77 @@ const InboxPage = () => {
           display: isMobile && showChat ? 'none' : 'block',
           height: isMobile ? '100%' : 'auto',
         }}>
-          <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="h6" fontWeight="bold">
+          <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', backgroundColor: 'background.default' }}>
+            {/* Search field - prominently displayed at the top */}
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="🔍 Search chats and messages..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              variant="outlined"
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                  </InputAdornment>
+                ),
+                endAdornment: searchQuery && (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      onClick={() => setSearchQuery('')}
+                      edge="end"
+                      sx={{ padding: '4px' }}
+                    >
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ 
+                mb: 2,
+                mt: 0,
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: 'background.paper',
+                  border: '2px solid',
+                  borderColor: 'primary.light',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                    borderColor: 'primary.main',
+                  },
+                  '&.Mui-focused': {
+                    borderColor: 'primary.main',
+                    backgroundColor: 'background.paper',
+                    boxShadow: '0 0 0 3px rgba(156, 39, 176, 0.1)',
+                  },
+                },
+                '& .MuiOutlinedInput-input': {
+                  padding: '10px 14px',
+                },
+              }}
+            />
+            <Typography variant="h6" fontWeight="bold" sx={{ mb: 1, mt: 0 }}>
               Conversations
             </Typography>
+            {isSearching && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                <CircularProgress size={16} />
+                <Typography variant="caption" color="text.secondary">
+                  Searching...
+                </Typography>
+              </Box>
+            )}
+            {searchQuery && !isSearching && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                Found {searchResults.conversations.length} chats, {searchResults.messages.length} messages
+              </Typography>
+            )}
           </Box>
           <List sx={{ p: 0 }}>
-            {conversations.map((conv) => {
+            {(searchQuery && !isSearching ? searchResults.conversations : conversations).map((conv) => {
               const platform = getPlatformFromChannelId(conv.channel_id);
               return (
                 <React.Fragment key={conv.id}>
@@ -1059,6 +1187,90 @@ const InboxPage = () => {
                 </React.Fragment>
               );
             })}
+            {/* Display search results for messages */}
+            {searchQuery && !isSearching && searchResults.messages.length > 0 && (
+              <>
+                <Divider sx={{ my: 1 }} />
+                <Box sx={{ px: 2, py: 1 }}>
+                  <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">
+                    Found Messages
+                  </Typography>
+                </Box>
+                {searchResults.messages.map((msg) => {
+                  const convId = msg.conversation_id_display || msg.conversation_id;
+                  const convTitle = msg.custom_name || msg.chat_title || 'Unknown Chat';
+                  const platform = msg.channel_id ? getPlatformFromChannelId(msg.channel_id) : 'unknown';
+                  return (
+                    <React.Fragment key={`msg-${msg.id}`}>
+                      <ListItem
+                        button
+                        onClick={async () => {
+                          // Find the conversation for this message
+                          let conversation = conversations.find(c => c.id === convId) || 
+                                           searchResults.conversations.find(c => c.id === convId);
+                          
+                          // If not found, create a minimal conversation object from message data
+                          // We'll fetch the full conversation details when opening it
+                          if (!conversation && msg) {
+                            conversation = {
+                              id: convId,
+                              chat_title: convTitle,
+                              custom_name: msg.custom_name,
+                              channel_id: msg.channel_id,
+                            };
+                          }
+                          
+                          if (conversation) {
+                            setSelectedThread(conversation);
+                            if (isMobile) {
+                              setShowChat(true);
+                            }
+                            // Clear search after selecting
+                            setSearchQuery('');
+                          }
+                        }}
+                        sx={{
+                          '&:hover': {
+                            backgroundColor: 'action.hover',
+                          },
+                        }}
+                      >
+                        <ListItemAvatar>
+                          <Avatar sx={{ bgcolor: 'primary.light' }}>
+                            💬
+                          </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary={
+                            <Box>
+                              <Typography variant="body2" fontWeight="medium" noWrap>
+                                {convTitle}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                                {msg.text ? (msg.text.length > 60 ? msg.text.substring(0, 60) + '...' : msg.text) : '[Media]'}
+                              </Typography>
+                            </Box>
+                          }
+                          secondary={
+                            <Typography variant="caption" color="text.secondary">
+                              {formatTime(msg.created_at)} • {platform}
+                            </Typography>
+                          }
+                        />
+                      </ListItem>
+                      <Divider />
+                    </React.Fragment>
+                  );
+                })}
+              </>
+            )}
+            {searchQuery && !isSearching && searchResults.conversations.length === 0 && searchResults.messages.length === 0 && (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Typography variant="body2" color="text.secondary">
+                  No results found
+                </Typography>
+              </Box>
+            )}
           </List>
         </Paper>
 

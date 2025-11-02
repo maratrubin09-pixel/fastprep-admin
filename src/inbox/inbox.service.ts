@@ -579,6 +579,95 @@ export class InboxService {
     return result.rows.length > 0;
   }
 
+  /**
+   * Search conversations and messages by query
+   * Returns conversations that match the search query in their title, sender name, or messages
+   */
+  async searchConversationsAndMessages(query: string, limit: number = 50): Promise<{
+    conversations: any[];
+    messages: any[];
+  }> {
+    const searchTerm = `%${query.toLowerCase()}%`;
+
+    // Search conversations by title, sender name, phone, username
+    const conversationsQuery = `
+      SELECT DISTINCT c.*
+      FROM conversations c
+      WHERE (
+        (deleted_at IS NULL OR is_deleted = false OR is_deleted IS NULL)
+        AND (is_archived = false OR is_archived IS NULL)
+        AND (
+          LOWER(c.chat_title) LIKE $1 OR
+          LOWER(c.custom_name) LIKE $1 OR
+          LOWER(c.sender_first_name) LIKE $1 OR
+          LOWER(c.sender_last_name) LIKE $1 OR
+          LOWER(COALESCE(c.sender_first_name || ' ' || c.sender_last_name, '')) LIKE $1 OR
+          LOWER(c.sender_phone) LIKE $1 OR
+          LOWER(c.sender_username) LIKE $1 OR
+          LOWER(c.external_chat_id) LIKE $1
+        )
+      )
+      ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
+      LIMIT $2
+    `;
+
+    const conversationsResult = await this.pool.query(conversationsQuery, [searchTerm, limit]);
+
+    // Search messages by text content
+    const messagesQuery = `
+      SELECT DISTINCT m.*, c.chat_title, c.custom_name, c.channel_id, c.id as conversation_id_display
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      WHERE (
+        (c.deleted_at IS NULL OR c.is_deleted = false OR c.is_deleted IS NULL)
+        AND (c.is_archived = false OR c.is_archived IS NULL)
+        AND LOWER(m.text) LIKE $1
+      )
+      ORDER BY m.created_at DESC
+      LIMIT $2
+    `;
+
+    const messagesResult = await this.pool.query(messagesQuery, [searchTerm, limit]);
+
+    // Format messages with reply_to_message if column exists
+    const hasReplyToColumn = await this.hasReplyToColumn();
+    let formattedMessages = messagesResult.rows;
+    
+    if (hasReplyToColumn && formattedMessages.length > 0) {
+      const messageIds = formattedMessages.map(m => m.id);
+      const replyQuery = `
+        SELECT 
+          m.id,
+          r.id as reply_to_id,
+          r.text as reply_to_text,
+          r.sender_name as reply_to_sender_name,
+          r.direction as reply_to_direction,
+          r.created_at as reply_to_created_at
+        FROM messages m
+        LEFT JOIN messages r ON m.reply_to = r.id
+        WHERE m.id = ANY($1::uuid[])
+      `;
+      const replyResult = await this.pool.query(replyQuery, [messageIds]);
+      const replyMap = new Map(replyResult.rows.map(r => [r.id, r.reply_to_id ? {
+        id: r.reply_to_id,
+        text: r.reply_to_text,
+        sender_name: r.reply_to_sender_name,
+        direction: r.reply_to_direction,
+        created_at: r.reply_to_created_at
+      } : null]));
+
+      formattedMessages = formattedMessages.map(m => ({
+        ...m,
+        reply_to_message: replyMap.get(m.id) || null
+      }));
+    }
+
+    return {
+      conversations: conversationsResult.rows,
+      messages: formattedMessages
+    };
+  }
+
   async getMessages(conversationId: string): Promise<any[]> {
     // Сначала проверяем, существует ли колонка reply_to
     const hasReplyToColumn = await this.hasReplyToColumn();
