@@ -98,6 +98,9 @@ export class InitDbController {
       await this.pool.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS object_key VARCHAR(500);
       `);
+      await this.pool.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES messages(id) ON DELETE SET NULL;
+      `);
 
       // Добавить оптимизированные индексы
       await this.pool.query(`
@@ -107,6 +110,10 @@ export class InitDbController {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_created_at 
         ON messages (conversation_id, created_at DESC);
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_messages_reply_to 
+        ON messages (reply_to) WHERE reply_to IS NOT NULL;
       `);
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_outbox_status_scheduled_at

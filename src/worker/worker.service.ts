@@ -116,9 +116,9 @@ export class WorkerService implements OnModuleDestroy {
   private async processOne(row: OutboxRow) {
     const client = await this.pool.connect();
     try {
-      // Получить данные сообщения
+      // Получить данные сообщения (включая reply_to)
       const msgRes = await client.query(
-        `SELECT conversation_id, text, object_key FROM messages WHERE id = $1`,
+        `SELECT conversation_id, text, object_key, reply_to FROM messages WHERE id = $1`,
         [row.message_id]
       );
       if (msgRes.rows.length === 0) {
@@ -130,7 +130,7 @@ export class WorkerService implements OnModuleDestroy {
       }
 
       const msg = msgRes.rows[0];
-      console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}`);
+      console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, replyTo=${msg.reply_to || 'null'}`);
 
       // Определяем платформу из channel_id и получаем telegram_peer_id
       const convRes = await client.query(
@@ -141,15 +141,28 @@ export class WorkerService implements OnModuleDestroy {
       const telegramPeerId = convRes.rows[0]?.telegram_peer_id || null;
       const platform = channelId.split(':')[0]; // например "telegram:123" -> "telegram"
 
-      console.log(`📤 Processing outbox ${row.id}: platform=${platform}, channelId=${channelId}, hasTelegramPeerId=${!!telegramPeerId}`);
+      // Если есть reply_to, получаем external_message_id исходного сообщения
+      let replyToExternalId: number | null = null;
+      if (msg.reply_to && platform === 'telegram') {
+        const replyMsgRes = await client.query(
+          `SELECT external_message_id FROM messages WHERE id = $1`,
+          [msg.reply_to]
+        );
+        if (replyMsgRes.rows[0]?.external_message_id) {
+          replyToExternalId = parseInt(replyMsgRes.rows[0].external_message_id, 10);
+          console.log(`📎 Reply to message ${msg.reply_to}, external_message_id=${replyToExternalId}`);
+        }
+      }
+
+      console.log(`📤 Processing outbox ${row.id}: platform=${platform}, channelId=${channelId}, hasTelegramPeerId=${!!telegramPeerId}, replyToExternalId=${replyToExternalId || 'null'}`);
 
       // Вызов соответствующего сервиса
       const start = Date.now();
       let result: { success: boolean; externalMessageId?: string; error?: string };
 
       if (platform === 'telegram') {
-        console.log(`📤 Calling sendViaTelegram: channelId=${channelId}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}, hasPeerId=${!!telegramPeerId}`);
-        result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId, msg.object_key);
+        console.log(`📤 Calling sendViaTelegram: channelId=${channelId}, hasObjectKey=${!!msg.object_key}, replyToExternalId=${replyToExternalId || 'null'}, hasPeerId=${!!telegramPeerId}`);
+        result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId, msg.object_key, replyToExternalId);
         console.log(`📤 sendViaTelegram result: success=${result.success}, error=${result.error || 'none'}`);
       } else {
         // Fallback to TG-Adapter for legacy
@@ -212,7 +225,8 @@ export class WorkerService implements OnModuleDestroy {
     channelId: string,
     text: string,
     telegramPeerId?: string | null,
-    objectKey?: string | null
+    objectKey?: string | null,
+    replyToMessageId?: number | null
   ): Promise<{ success: boolean; externalMessageId?: string; error?: string }> {
     try {
       // Extract chat ID from channel_id format: "telegram:12345"
@@ -223,14 +237,14 @@ export class WorkerService implements OnModuleDestroy {
 
       // Если есть вложение, отправляем с файлом
       if (objectKey) {
-        const result = await this.telegramService.sendMessageWithFile(chatId, text, objectKey, telegramPeerId);
+        const result = await this.telegramService.sendMessageWithFile(chatId, text, objectKey, telegramPeerId, replyToMessageId);
         return {
           success: true,
           externalMessageId: String(result.id),
         };
       } else {
         // Обычная текстовая отправка
-      const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
+      const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId, replyToMessageId);
       return {
         success: true,
         externalMessageId: String(result.id),

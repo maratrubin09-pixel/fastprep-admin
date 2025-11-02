@@ -950,19 +950,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendMessage(chatId: string | number, text: string, telegramPeerId?: string | null): Promise<any> {
+  async sendMessage(
+    chatId: string | number, 
+    text: string, 
+    telegramPeerId?: string | null,
+    replyToMessageId?: number | null
+  ): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');
     }
 
     try {
-      this.logger.log(`📤 Sending message to chat ${chatId}`);
+      this.logger.log(`📤 Sending message to chat ${chatId}${replyToMessageId ? ` (reply to ${replyToMessageId})` : ''}`);
       
       const entity = await this.resolveEntity(chatId, telegramPeerId);
       
-      const result = await this.client.sendMessage(entity, {
+      const messageOptions: any = {
         message: text,
-      });
+      };
+
+      // Если есть reply_to, добавляем reply параметр
+      if (replyToMessageId) {
+        messageOptions.replyTo = replyToMessageId;
+        this.logger.log(`📎 Adding reply to message ${replyToMessageId}`);
+      }
+      
+      const result = await this.client.sendMessage(entity, messageOptions);
 
       this.logger.log(`✅ Message sent successfully: ${result.id}`);
       return result;
@@ -997,7 +1010,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     chatId: string | number,
     text: string,
     objectKey: string,
-    telegramPeerId?: string | null
+    telegramPeerId?: string | null,
+    replyToMessageId?: number | null
   ): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');
@@ -1050,6 +1064,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // Добавляем текст как подпись, если есть
       if (text && text.trim()) {
         fileOptions.caption = text;
+      }
+
+      // Если есть reply_to, добавляем reply параметр
+      if (replyToMessageId) {
+        fileOptions.replyTo = replyToMessageId;
+        this.logger.log(`📎 Adding reply to message ${replyToMessageId} in file message`);
       }
 
       // Для фото используем специальный формат

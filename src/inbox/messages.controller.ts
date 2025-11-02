@@ -26,6 +26,10 @@ class SendMessageDto {
   @IsOptional()
   @IsString()
   objectKey?: string;
+  
+  @IsOptional()
+  @IsString()
+  replyTo?: string; // UUID сообщения, на которое отвечаем
 }
 
 @Controller('inbox')
@@ -140,10 +144,19 @@ export class MessagesController {
       }
     }
 
+    // Валидация reply_to (если указан)
+    if (dto.replyTo) {
+      // Проверяем, что сообщение существует и принадлежит этому чату
+      const replyMessage = await this.inbox.getMessage(dto.replyTo);
+      if (!replyMessage || replyMessage.conversation_id !== threadId) {
+        throw new BadRequestException('Reply message not found or belongs to different conversation');
+      }
+    }
+
     // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
-    console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, objectKey=${dto.objectKey || 'null'}`);
-    console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, textLength: dto.text?.length || 0 }));
-    const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
+    console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, replyTo=${dto.replyTo || 'null'}`);
+    console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, replyTo: dto.replyTo, textLength: dto.text?.length || 0 }));
+    const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey, dto.replyTo);
     console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
 
     // Возвращаем 201 Created с полными данными сообщения

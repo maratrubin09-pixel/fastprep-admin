@@ -33,6 +33,8 @@ import {
   Edit as EditIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
+  Reply as ReplyIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import { useMediaQuery as useMuiMediaQuery } from '@mui/material';
 import { io } from 'socket.io-client';
@@ -239,6 +241,7 @@ const InboxPage = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null); // Сообщение на которое отвечаем { id, text, sender_name }
   
   // Responsive design
   const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
@@ -418,6 +421,7 @@ const InboxPage = () => {
   useEffect(() => {
     if (selectedThread) {
       fetchMessages(selectedThread.id);
+      setReplyingTo(null); // Сбрасываем reply при смене чата
     }
   }, [selectedThread]);
 
@@ -698,6 +702,7 @@ const InboxPage = () => {
       const requestBody = {
         text: text || '', // Пустой текст если только файл
         objectKey: attachedFileKey || undefined,
+        replyTo: replyingTo?.id || undefined, // ID сообщения на которое отвечаем
       };
       
       console.log('📤 Sending message request:', {
@@ -740,9 +745,10 @@ const InboxPage = () => {
         console.log('✅ Message sent successfully');
       }
       
-      // Очищаем поле ввода и вложение
+      // Очищаем поле ввода, вложение и reply
       setMessageText('');
       setAttachedFileKey(null);
+      setReplyingTo(null); // Сбрасываем reply
       setFileUploadResetKey(prev => prev + 1); // Сбрасываем FileUpload компонент
       if (messageInputRef.current) {
         messageInputRef.current.value = '';
@@ -1179,6 +1185,10 @@ const InboxPage = () => {
                         sx={{
                           display: 'flex',
                           justifyContent: msg.direction === 'out' ? 'flex-end' : 'flex-start',
+                          position: 'relative',
+                          '&:hover .reply-button': {
+                            opacity: 1,
+                          },
                         }}
                       >
                         <Paper
@@ -1191,6 +1201,7 @@ const InboxPage = () => {
                             boxShadow: msg.direction === 'in' ? '0 1px 2px rgba(0,0,0,0.05)' : '0 1px 3px rgba(156,39,176,0.15)', // Мягкие тени
                             wordWrap: 'break-word',
                             overflowWrap: 'break-word',
+                            position: 'relative',
                             '& .message-link': {
                               wordBreak: 'break-all',
                               overflowWrap: 'anywhere',
@@ -1212,6 +1223,37 @@ const InboxPage = () => {
                             <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
                               {msg.sender_name}
                             </Typography>
+                          )}
+                          {/* Отображение reply_to сообщения (цитата) */}
+                          {msg.reply_to_message && (
+                            <Box
+                              sx={{
+                                mb: 1,
+                                pl: 1.5,
+                                borderLeft: '3px solid',
+                                borderColor: msg.direction === 'out' ? '#BA68C8' : 'primary.main',
+                                backgroundColor: msg.direction === 'out' ? 'rgba(186, 104, 200, 0.1)' : 'rgba(156, 39, 176, 0.05)',
+                                borderRadius: '4px',
+                                py: 0.5,
+                                maxWidth: '100%',
+                              }}
+                            >
+                              <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.25 }}>
+                                {msg.reply_to_message.direction === 'out' ? 'You' : (msg.reply_to_message.sender_name || 'Unknown')}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  display: 'block',
+                                  opacity: 0.8,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {msg.reply_to_message.text || '[Media]'}
+                              </Typography>
+                            </Box>
                           )}
                           {/* Отображение медиафайлов */}
                           {(msg.object_key || msg.objectKey) && (
@@ -1305,6 +1347,34 @@ const InboxPage = () => {
                               </>
                             )}
                           </Box>
+                          {/* Кнопка Reply - появляется при hover */}
+                          <IconButton
+                            className="reply-button"
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReplyingTo({ 
+                                id: msg.id, 
+                                text: msg.text, 
+                                sender_name: msg.sender_name || (msg.direction === 'out' ? 'You' : 'Unknown') 
+                              });
+                            }}
+                            sx={{ 
+                              position: 'absolute',
+                              top: 8,
+                              right: 8,
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                              '&:hover': { 
+                                opacity: 1,
+                                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                              }
+                            }}
+                            title="Reply"
+                          >
+                            <ReplyIcon fontSize="small" />
+                          </IconButton>
                         </Paper>
                       </Box>
                     ))}
@@ -1316,6 +1386,48 @@ const InboxPage = () => {
 
               {/* Input */}
               <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                {/* Отображение сообщения на которое отвечаем */}
+                {replyingTo && (
+                  <Box
+                    sx={{
+                      mb: 1,
+                      p: 1,
+                      pl: 1.5,
+                      backgroundColor: 'rgba(156, 39, 176, 0.08)',
+                      borderLeft: '3px solid',
+                      borderColor: 'primary.main',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.25 }}>
+                        Replying to {replyingTo.sender_name || 'Unknown'}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          display: 'block',
+                          opacity: 0.8,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {replyingTo.text || '[Media]'}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      size="small"
+                      onClick={() => setReplyingTo(null)}
+                      sx={{ ml: 1 }}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                )}
                 <Box display="flex" gap={1} alignItems="flex-end">
                   <FileUpload
                     threadId={selectedThread.id}
