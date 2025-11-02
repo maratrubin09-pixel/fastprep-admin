@@ -685,9 +685,9 @@ export class InboxService {
         conversations: conversationsResult.rows,
         messages: formattedMessages
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Search error:', error);
-      console.error('Error details:', error.message, error.stack);
+      console.error('Error details:', error?.message || String(error), error?.stack);
       throw error;
     }
   }
