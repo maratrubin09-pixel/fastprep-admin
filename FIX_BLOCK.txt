@@ -1,0 +1,33 @@
+
+
+Замените строки 390-407 на следующее:
+
+            if ((entity as any).className === 'User') {
+              // Используем только если еще не получили данные
+              if (!senderFirstName) senderFirstName = entityFirstName;
+              if (!senderLastName) senderLastName = entityLastName;
+              if (!senderUsername) senderUsername = entityUsername;
+              if (!senderPhone) senderPhone = entityPhone;
+              
+              const name = `${senderFirstName || ''} ${senderLastName || ''}`.trim() || entityUsername || entityPhone;
+              if (name && senderName === 'Unknown') {
+                senderName = name;
+                chatTitle = name;
+                this.logger.log(`✅ Method 2b - Updated senderName: ${senderName}, chatTitle: ${chatTitle}`);
+              } else if (entityTitle && chatTitle === 'Unknown') {
+                chatTitle = entityTitle;
+                this.logger.log(`✅ Method 2b - Updated chatTitle: ${chatTitle}`);
+              }
+            } else if (entityTitle && chatTitle === 'Unknown') {
+              // Для групповых чатов используем title
+              chatTitle = entityTitle;
+              this.logger.log(`✅ Method 2b - Updated chatTitle (group): ${chatTitle}`);
+            }
+            
+            this.logger.log(`✅ Got entity info: chatTitle=${chatTitle}, senderName=${senderName}`);
+          } else {
+            this.logger.warn(`⚠️ Method 2b - Could not get entity (new chat or access denied)`);
+          }
+
+А строка 407 (после logger.log) должна быть закрыта, а перед catch добавлен else блок.
+

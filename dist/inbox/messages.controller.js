@@ -18,7 +18,18 @@ const class_validator_1 = require("class-validator");
 const s3_service_1 = require("../storage/s3.service");
 const inbox_service_1 = require("./inbox.service");
 const pep_guard_1 = require("../authz/pep.guard");
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'video/mp4'];
+// Расширенный список разрешенных типов (должен совпадать с uploads.controller.ts)
+const ALLOWED_TYPES = [
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'image/heic', 'image/heif', 'image/bmp', 'image/svg+xml',
+    'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm',
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/webm',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 class SendMessageDto {
     text;
@@ -53,13 +64,15 @@ let MessagesController = class MessagesController {
     }
     /**
      * GET /api/inbox/conversations/:id/messages
-     * Get all messages for a conversation
+     * Get all messages for a conversation and mark as read
      */
     async getMessages(threadId, req) {
         const userId = req.user?.id;
         if (!userId) {
             throw new common_1.BadRequestException('User not authenticated');
         }
+        // Mark conversation as read when opening it
+        await this.inbox.markConversationAsRead(threadId);
         return await this.inbox.getMessages(threadId);
     }
     /**
@@ -85,17 +98,33 @@ let MessagesController = class MessagesController {
             if (!head.exists) {
                 throw new common_1.BadRequestException({ code: 'FILE_NOT_FOUND', message: 'Attachment not found in S3' });
             }
-            if (head.contentType && !ALLOWED_TYPES.includes(head.contentType)) {
-                throw new common_1.BadRequestException({ code: 'TYPE_NOT_ALLOWED', message: 'Attachment type not allowed' });
+            // Разрешаем все типы, которые начинаются с image/, video/, audio/ или в списке разрешенных
+            const isAllowed = head.contentType && (ALLOWED_TYPES.includes(head.contentType) ||
+                head.contentType.startsWith('image/') ||
+                head.contentType.startsWith('video/') ||
+                head.contentType.startsWith('audio/'));
+            if (!isAllowed) {
+                throw new common_1.BadRequestException({
+                    code: 'TYPE_NOT_ALLOWED',
+                    message: `Attachment type not allowed: ${head.contentType}`
+                });
             }
             if (head.size && head.size > MAX_SIZE) {
                 throw new common_1.BadRequestException({ code: 'SIZE_EXCEEDED', message: 'Attachment size exceeds limit' });
             }
         }
         // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
+        console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, objectKey=${dto.objectKey || 'null'}`);
+        console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, textLength: dto.text?.length || 0 }));
         const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey);
+        console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
         // Возвращаем 201 Created с полными данными сообщения
-        return message;
+        // Явно добавляем object_key и objectKey для совместимости с frontend
+        return {
+            ...message,
+            object_key: message.object_key,
+            objectKey: message.object_key, // camelCase для совместимости
+        };
     }
     /**
      * DELETE /api/inbox/conversations/:id

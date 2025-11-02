@@ -94,22 +94,28 @@ let InboxService = class InboxService {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN');
+            console.log(`🔍 About to insert message: threadId=${threadId}, senderId=${senderId}, textLength=${text?.length || 0}, objectKey=${objectKey || 'NULL'}`);
             const msgRes = await client.query(`INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, delivery_status, created_at, updated_at)
          VALUES ($1, $2, 'out', $3, $4, 'queued', NOW(), NOW())
-         RETURNING *`, [threadId, senderId, text, objectKey]);
+         RETURNING *`, [threadId, senderId, text || '', objectKey || null]);
             const message = msgRes.rows[0];
-            await client.query(`INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
-         VALUES ($1, $2, 'pending', NOW(), 0, NOW())`, [message.id, threadId]);
+            console.log(`✅ Message created: id=${message.id}, threadId=${threadId}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}, textLength=${message.text?.length || 0}`);
+            const outboxRes = await client.query(`INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
+         VALUES ($1, $2, 'pending', NOW(), 0, NOW())
+         RETURNING *`, [message.id, threadId]);
+            console.log(`✅ Outbox entry created: message_id=${message.id}, conversation_id=${threadId}, outbox_id=${outboxRes.rows[0].id}`);
             // audit_log (с EP-snapshot — упрощённо)
             await client.query(`INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, created_at)
          VALUES ($1, 'message.send', 'message', $2, $3, NOW())`, [senderId, message.id, JSON.stringify({ threadId, text: text ? text.substring(0, 50) : '' })]);
             // Update conversation's last_message_at
             await client.query(`UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`, [threadId]);
             await client.query('COMMIT');
+            console.log(`✅ Transaction committed successfully for message ${message.id}`);
             return message;
         }
         catch (err) {
             await client.query('ROLLBACK');
+            console.error(`❌ Transaction rolled back for message creation:`, err);
             throw err;
         }
         finally {
@@ -118,24 +124,78 @@ let InboxService = class InboxService {
     }
     /**
      * Find or create conversation thread by channel_id
+     * Also searches by external_chat_id, sender_phone, and telegram_peer_id to find deleted conversations
      */
     async findOrCreateThread(params) {
         const client = await this.pool.connect();
         try {
-            // Try to find existing thread
-            const existingThread = await client.query(`SELECT * FROM conversations WHERE channel_id = $1`, [params.channel_id]);
+            // Try to find existing thread by channel_id (including deleted ones)
+            let existingThread = await client.query(`SELECT * FROM conversations WHERE channel_id = $1`, [params.channel_id]);
+            // If not found, try to find by other identifiers (even if deleted)
+            if (existingThread.rows.length === 0) {
+                const searchConditions = [];
+                const searchValues = [];
+                let paramIndex = 1;
+                if (params.external_chat_id) {
+                    searchConditions.push(`external_chat_id = $${paramIndex++}`);
+                    searchValues.push(params.external_chat_id);
+                }
+                if (params.sender_phone) {
+                    searchConditions.push(`sender_phone = $${paramIndex++}`);
+                    searchValues.push(params.sender_phone);
+                }
+                if (params.telegram_peer_id) {
+                    searchConditions.push(`telegram_peer_id = $${paramIndex++}`);
+                    searchValues.push(params.telegram_peer_id);
+                }
+                if (searchConditions.length > 0) {
+                    const searchQuery = `
+            SELECT * FROM conversations 
+            WHERE (${searchConditions.join(' OR ')})
+            ORDER BY deleted_at NULLS FIRST, created_at DESC
+            LIMIT 1
+          `;
+                    existingThread = await client.query(searchQuery, searchValues);
+                }
+            }
             if (existingThread.rows.length > 0) {
+                const foundThread = existingThread.rows[0];
+                const isDeleted = foundThread.deleted_at !== null;
+                // If thread was deleted, restore it
+                if (isDeleted) {
+                    await client.query(`UPDATE conversations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1`, [foundThread.id]);
+                    // Re-add to Redis unassigned set if it was removed
+                    await this.redis.sadd('inbox:unassigned', foundThread.id);
+                }
                 // Update chat info if provided (обновляем только если новое значение не null)
                 const updates = [];
                 const values = [];
                 let paramIndex = 1;
+                // Update channel_id if it changed (for restored conversations)
+                if (foundThread.channel_id !== params.channel_id) {
+                    updates.push(`channel_id = $${paramIndex++}`);
+                    values.push(params.channel_id);
+                }
                 if (params.chat_title !== undefined) {
                     // Обновляем chat_title если:
                     // 1. Новое значение не null И не "Unknown" (всегда обновляем лучшее значение)
                     // 2. Старое было "Unknown", а новое что-то другое
-                    const currentTitle = existingThread.rows[0].chat_title;
-                    const shouldUpdate = (params.chat_title && params.chat_title !== 'Unknown') ||
-                        (currentTitle === 'Unknown' && params.chat_title && params.chat_title !== 'Unknown');
+                    // 3. Новое значение содержит больше информации (не начинается с "@" или "Chat")
+                    const currentTitle = foundThread.chat_title;
+                    const newTitle = params.chat_title;
+                    // Определяем приоритет имен
+                    const getTitlePriority = (title) => {
+                        if (!title || title === 'Unknown')
+                            return 0;
+                        if (title.startsWith('Chat ') || title.startsWith('@'))
+                            return 1; // Низкий приоритет (fallback)
+                        if (title.includes('+') && /^\+?[0-9]+$/.test(title.replace(/\s/g, '')))
+                            return 2; // Телефон
+                        return 3; // Полное имя - высокий приоритет
+                    };
+                    const shouldUpdate = (newTitle && newTitle !== 'Unknown' && getTitlePriority(newTitle) > getTitlePriority(currentTitle)) ||
+                        (currentTitle === 'Unknown' && newTitle && newTitle !== 'Unknown') ||
+                        (newTitle && !newTitle.startsWith('@') && !newTitle.startsWith('Chat ') && currentTitle && (currentTitle.startsWith('@') || currentTitle.startsWith('Chat ')));
                     if (shouldUpdate || params.chat_title === null) {
                         updates.push(`chat_title = $${paramIndex++}`);
                         values.push(params.chat_title);
@@ -175,24 +235,24 @@ let InboxService = class InboxService {
                     values.push(params.sender_last_name);
                 }
                 if (updates.length > 0) {
-                    values.push(existingThread.rows[0].id);
-                    const currentData = existingThread.rows[0];
-                    console.log(`🔄 Updating conversation ${existingThread.rows[0].id}: ${updates.join(', ')}`);
+                    values.push(foundThread.id);
+                    const currentData = foundThread;
+                    console.log(`🔄 Updating conversation ${foundThread.id}: ${updates.join(', ')}`);
                     console.log(`📊 Before update: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
                     console.log(`📊 Update values: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
                     await client.query(`UPDATE conversations 
              SET ${updates.join(', ')}, updated_at = NOW()
              WHERE id = $${paramIndex}`, values);
                     // Fetch updated thread
-                    const updated = await client.query(`SELECT * FROM conversations WHERE id = $1`, [existingThread.rows[0].id]);
-                    console.log(`✅ Conversation updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
+                    const updated = await client.query(`SELECT * FROM conversations WHERE id = $1`, [foundThread.id]);
+                    console.log(`✅ Conversation ${isDeleted ? 'restored and ' : ''}updated: chat_title="${updated.rows[0].chat_title}", telegram_peer_id=${updated.rows[0].telegram_peer_id ? 'present' : 'null'}`);
                     return updated.rows[0];
                 }
-                const currentData = existingThread.rows[0];
-                console.log(`⏭️ No updates needed for conversation ${existingThread.rows[0].id}`);
+                const currentData = foundThread;
+                console.log(`⏭️ No updates needed for conversation ${foundThread.id}`);
                 console.log(`📊 Current data: chat_title="${currentData.chat_title}", telegram_peer_id=${currentData.telegram_peer_id ? 'present' : 'null'}`);
                 console.log(`📊 Received params: chat_title=${params.chat_title}, telegram_peer_id=${params.telegram_peer_id ? 'present' : 'null'}`);
-                return existingThread.rows[0];
+                return foundThread;
             }
             // Create new thread with chat info
             const result = await client.query(`INSERT INTO conversations (channel_id, external_chat_id, chat_title, chat_type, participant_count, telegram_peer_id, sender_phone, sender_username, sender_first_name, sender_last_name, status, created_at, updated_at)
@@ -220,17 +280,35 @@ let InboxService = class InboxService {
     }
     /**
      * Create incoming message
+     * Increments unread_count if direction is 'in'
      */
     async createMessage(params) {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN');
-            const result = await client.query(`INSERT INTO messages (conversation_id, direction, text, external_message_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW())
-         RETURNING *`, [params.conversation_id, params.direction, params.text, params.external_message_id || null]);
+            const result = await client.query(`INSERT INTO messages (conversation_id, direction, text, external_message_id, sender_name, metadata, object_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+         RETURNING *`, [
+                params.conversation_id,
+                params.direction,
+                params.text,
+                params.external_message_id || null,
+                params.sender_name || null,
+                params.metadata ? JSON.stringify(params.metadata) : null,
+                params.object_key || null,
+            ]);
             const message = result.rows[0];
-            // Update thread's last_message_at
-            await client.query(`UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`, [params.conversation_id]);
+            // Update thread's last_message_at and increment unread_count for incoming messages
+            if (params.direction === 'in') {
+                await client.query(`UPDATE conversations 
+           SET last_message_at = NOW(), 
+               unread_count = unread_count + 1,
+               updated_at = NOW() 
+           WHERE id = $1`, [params.conversation_id]);
+            }
+            else {
+                await client.query(`UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`, [params.conversation_id]);
+            }
             await client.query('COMMIT');
             return message;
         }
@@ -243,6 +321,12 @@ let InboxService = class InboxService {
         }
     }
     /**
+     * Mark conversation as read (reset unread_count)
+     */
+    async markConversationAsRead(conversationId) {
+        await this.pool.query(`UPDATE conversations SET unread_count = 0, updated_at = NOW() WHERE id = $1`, [conversationId]);
+    }
+    /**
      * Update message delivery status
      */
     async updateMessageStatus(externalMessageId, status) {
@@ -250,10 +334,11 @@ let InboxService = class InboxService {
        WHERE external_message_id = $2`, [status, externalMessageId]);
     }
     /**
-     * Get all conversations ordered by last activity
+     * Get all conversations ordered by last activity (excluding deleted)
      */
     async getAllConversations() {
         const result = await this.pool.query(`SELECT * FROM conversations 
+       WHERE deleted_at IS NULL
        ORDER BY COALESCE(last_message_at, created_at) DESC
        LIMIT 100`);
         return result.rows;
@@ -268,25 +353,33 @@ let InboxService = class InboxService {
         return result.rows;
     }
     /**
-     * Delete conversation and all related data
+     * Soft delete conversation (mark as deleted instead of physically deleting)
+     * This allows restoring conversations when new messages arrive from the same sender
      */
     async deleteConversation(conversationId) {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN');
-            // Delete outbox entries
-            await client.query(`DELETE FROM outbox WHERE conversation_id = $1`, [conversationId]);
-            // Delete messages (CASCADE should handle this, but explicit is better)
-            await client.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
-            // Delete conversation
-            const result = await client.query(`DELETE FROM conversations WHERE id = $1 RETURNING id, channel_id`, [conversationId]);
+            // Soft delete conversation (mark as deleted)
+            const result = await client.query(`UPDATE conversations 
+         SET deleted_at = NOW(), updated_at = NOW() 
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id, channel_id`, [conversationId]);
+            if (result.rows.length === 0) {
+                await client.query('ROLLBACK');
+                // Check if conversation exists but is already deleted
+                const existing = await client.query(`SELECT id FROM conversations WHERE id = $1`, [conversationId]);
+                if (existing.rows.length === 0) {
+                    return { success: false, message: 'Conversation not found' };
+                }
+                else {
+                    return { success: false, message: 'Conversation already deleted' };
+                }
+            }
             // Remove from Redis unassigned set
             await this.redis.srem('inbox:unassigned', conversationId);
             await this.redis.del(`inbox:assignee:${conversationId}`);
             await client.query('COMMIT');
-            if (result.rows.length === 0) {
-                return { success: false, message: 'Conversation not found' };
-            }
             return {
                 success: true,
                 message: `Deleted conversation ${conversationId} (${result.rows[0].channel_id})`

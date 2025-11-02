@@ -40,8 +40,15 @@ const common_1 = require("@nestjs/common");
 const jwt_guard_1 = require("./auth/jwt.guard");
 const express = __importStar(require("express"));
 async function bootstrap() {
+    // Настраиваем CORS из переменной окружения
+    const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS?.split(',') ||
+        process.env.CORS_ORIGIN?.split(',') ||
+        ['https://admin.fastprepusa.com'];
     const app = await core_1.NestFactory.create(app_module_1.AppModule, {
-        cors: true,
+        cors: {
+            origin: allowedOrigins,
+            credentials: true,
+        },
         bodyParser: true, // Явно включаем встроенный body parser NestJS
     });
     // КРИТИЧЕСКИ ВАЖНО: Body parser ПЕРЕД всеми middleware/guards!

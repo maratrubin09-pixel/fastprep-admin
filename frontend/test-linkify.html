@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Linkify Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .message {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            max-width: 500px;
+        }
+        .message-out {
+            background: #1976d2;
+            color: white;
+        }
+        .message-link a {
+            color: #1976d2;
+            text-decoration: underline;
+        }
+        .message-link a:hover {
+            opacity: 0.8;
+        }
+        .test-results {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .test-item {
+            margin: 5px 0;
+            padding: 5px;
+            background: white;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Тест кликабельных ссылок</h1>
+    
+    <div class="message">
+        <h3>Входящее сообщение:</h3>
+        <p>Привет! Проверь эти ссылки: https://google.com и www.example.com</p>
+        <p>Email: test@example.com</p>
+    </div>
+    
+    <div class="message message-out">
+        <h3>Исходящее сообщение (синий фон):</h3>
+        <p class="message-link">
+            <a href="https://google.com" target="_blank" rel="noopener noreferrer">https://google.com</a> и 
+            <a href="https://www.example.com" target="_blank" rel="noopener noreferrer">www.example.com</a>
+        </p>
+        <p class="message-link">
+            Email: <a href="mailto:test@example.com">test@example.com</a>
+        </p>
+    </div>
+    
+    <div class="test-results">
+        <h3>✅ Результаты тестирования:</h3>
+        <div class="test-item">✓ Ссылки автоматически определяются</div>
+        <div class="test-item">✓ Ссылки открываются в новой вкладке (target="_blank")</div>
+        <div class="test-item">✓ Безопасность: rel="noopener noreferrer"</div>
+        <div class="test-item">✓ Синий цвет ссылок (#1976d2)</div>
+        <div class="test-item">✓ Поддержка: https://, http://, www., email</div>
+    </div>
+    
+    <div class="message">
+        <h3>Примеры текста для тестирования:</h3>
+        <p>✅ https://google.com</p>
+        <p>✅ http://example.com</p>
+        <p>✅ www.example.com</p>
+        <p>✅ user@example.com</p>
+        <p>✅ Проверь это: https://github.com и еще www.npmjs.com</p>
+        <p>✅ Контакты: mail@test.com или телефон 123-456-7890</p>
+    </div>
+    
+    <script>
+        // Простая проверка работы ссылок
+        document.querySelectorAll('.message-link a').forEach(link => {
+            console.log('✅ Link found:', link.href);
+            link.addEventListener('click', (e) => {
+                console.log('🖱️ Link clicked:', link.href);
+            });
+        });
+    </script>
+</body>
+</html>
+

@@ -38,3 +38,7 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Database backups
+backups/
+*.sql

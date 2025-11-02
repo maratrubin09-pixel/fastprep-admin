@@ -123,11 +123,13 @@ let WorkerService = class WorkerService {
             const msgRes = await client.query(`SELECT conversation_id, text, object_key FROM messages WHERE id = $1`, [row.message_id]);
             if (msgRes.rows.length === 0) {
                 // Сообщение удалено — помечаем outbox как failed
+                console.error(`❌ Message ${row.message_id} not found in database`);
                 await this.markFailed(client, row.id, 'Message not found');
                 this.metrics.outboxProcessedTotal.inc({ status: 'failed' });
                 return;
             }
             const msg = msgRes.rows[0];
+            console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}`);
             // Определяем платформу из channel_id и получаем telegram_peer_id
             const convRes = await client.query(`SELECT channel_id, telegram_peer_id FROM conversations WHERE id = $1`, [msg.conversation_id]);
             const channelId = convRes.rows[0]?.channel_id || '';
@@ -138,7 +140,9 @@ let WorkerService = class WorkerService {
             const start = Date.now();
             let result;
             if (platform === 'telegram') {
-                result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId);
+                console.log(`📤 Calling sendViaTelegram: channelId=${channelId}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}, hasPeerId=${!!telegramPeerId}`);
+                result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId, msg.object_key);
+                console.log(`📤 sendViaTelegram result: success=${result.success}, error=${result.error || 'none'}`);
             }
             else {
                 // Fallback to TG-Adapter for legacy
@@ -192,18 +196,29 @@ let WorkerService = class WorkerService {
     /**
      * Send via Telegram TDLib
      */
-    async sendViaTelegram(channelId, text, telegramPeerId) {
+    async sendViaTelegram(channelId, text, telegramPeerId, objectKey) {
         try {
             // Extract chat ID from channel_id format: "telegram:12345"
             const chatId = channelId.split(':')[1];
             if (!chatId) {
                 return { success: false, error: 'Invalid channel_id format' };
             }
-            const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
-            return {
-                success: true,
-                externalMessageId: String(result.id),
-            };
+            // Если есть вложение, отправляем с файлом
+            if (objectKey) {
+                const result = await this.telegramService.sendMessageWithFile(chatId, text, objectKey, telegramPeerId);
+                return {
+                    success: true,
+                    externalMessageId: String(result.id),
+                };
+            }
+            else {
+                // Обычная текстовая отправка
+                const result = await this.telegramService.sendMessage(chatId, text, telegramPeerId);
+                return {
+                    success: true,
+                    externalMessageId: String(result.id),
+                };
+            }
         }
         catch (error) {
             return {

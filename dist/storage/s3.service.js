@@ -44,6 +44,13 @@ let S3Service = class S3Service {
             ContentType: contentType,
         });
         const putUrl = await (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
+        // Логирование для отладки
+        console.log('🔗 Generated presigned PUT URL:', {
+            key,
+            bucket: this.bucket,
+            endpoint: process.env.S3_ENDPOINT,
+            urlPreview: putUrl.substring(0, 100) + '...',
+        });
         return { putUrl, objectKey: key, expiresIn };
     }
     /**
@@ -72,12 +79,72 @@ let S3Service = class S3Service {
     /**
      * Генерация presigned GET URL для скачивания файла
      */
-    async createPresignedGet(key, expiresIn = 300) {
+    async createPresignedGet(key, expiresIn = 3600) {
         const command = new client_s3_2.GetObjectCommand({
             Bucket: this.bucket,
             Key: key,
         });
         return (0, s3_request_presigner_1.getSignedUrl)(this.client, command, { expiresIn });
+    }
+    /**
+     * Загрузить файл напрямую в S3 (для серверных загрузок)
+     */
+    async putObject(key, body, contentType) {
+        const command = new client_s3_2.PutObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+        });
+        await this.client.send(command);
+        console.log(`✅ File uploaded to S3: ${key}`);
+    }
+    /**
+     * Скачать файл из S3
+     */
+    async getObject(key) {
+        console.log(`📥 getObject: key=${key}, bucket=${this.bucket}, endpoint=${process.env.S3_ENDPOINT}`);
+        const command = new client_s3_2.GetObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+        });
+        let response;
+        try {
+            response = await this.client.send(command);
+            if (!response.Body) {
+                console.error(`❌ File not found in S3: ${key}`);
+                throw new Error(`File not found in S3: ${key}`);
+            }
+            console.log(`✅ Object retrieved from S3: key=${key}, contentType=${response.ContentType || 'unknown'}, contentLength=${response.ContentLength || 'unknown'}`);
+        }
+        catch (error) {
+            console.error(`❌ Error getting object from S3: key=${key}, error=${error.message || error}`);
+            throw error;
+        }
+        // AWS SDK v3 возвращает Readable stream
+        // Конвертируем stream в Buffer
+        const chunks = [];
+        const stream = response.Body;
+        // Проверяем, есть ли метод transformToByteArray (для AWS SDK v3)
+        if (typeof stream.transformToByteArray === 'function') {
+            const buffer = await stream.transformToByteArray();
+            return {
+                body: Buffer.from(buffer),
+                contentType: response.ContentType,
+            };
+        }
+        // Fallback для стандартного Node.js stream
+        return new Promise((resolve, reject) => {
+            stream.on('data', (chunk) => chunks.push(chunk));
+            stream.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                resolve({
+                    body: buffer,
+                    contentType: response.ContentType,
+                });
+            });
+            stream.on('error', reject);
+        });
     }
 };
 exports.S3Service = S3Service;

@@ -11,7 +11,11 @@ import {
   Typography,
   Box,
   Collapse,
+  useMediaQuery,
+  IconButton,
+  Fab,
 } from '@mui/material';
+import { Menu as MenuIcon, Add as AddIcon } from '@mui/icons-material';
 import {
   Dashboard,
   Inbox,
@@ -33,15 +37,25 @@ import {
 
 const DRAWER_WIDTH = 260;
 
-const Sidebar = () => {
+const Sidebar = ({ mobileOpen, onMobileClose, onNewChatClick }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [openMessages, setOpenMessages] = React.useState(true);
   const [openCustomers, setOpenCustomers] = React.useState(false);
   const [openTasks, setOpenTasks] = React.useState(false);
   const [openSettings, setOpenSettings] = React.useState(false);
+  const isTabletOrMobile = useMediaQuery('(max-width: 1024px)');
+  const isInboxSection = location.pathname.includes('/messages/inbox') || 
+                         location.pathname.includes('/messages/telegram');
 
   const isActive = (path) => location.pathname === path;
+  
+  const handleNavigate = (path) => {
+    navigate(path);
+    if (isTabletOrMobile && onMobileClose) {
+      onMobileClose();
+    }
+  };
 
   const menuItems = [
     {
@@ -56,11 +70,13 @@ const Sidebar = () => {
       open: openMessages,
       setOpen: setOpenMessages,
       items: [
-        { title: 'Inbox (Unified)', icon: <Inbox />, path: '/messages/inbox' },
+        { title: 'All Messages', icon: <Inbox />, path: '/messages/inbox' },
         { title: 'WhatsApp', icon: <WhatsApp />, path: '/messages/whatsapp' },
         { title: 'Telegram', icon: <Telegram />, path: '/messages/telegram' },
         { title: 'Instagram', icon: <Instagram />, path: '/messages/instagram' },
         { title: 'Facebook', icon: <Facebook />, path: '/messages/facebook' },
+        { title: 'Archive', icon: <Inbox />, path: '/messages/archive' },
+        { title: 'Trash', icon: <Inbox />, path: '/messages/trash' },
       ],
     },
     {
@@ -99,24 +115,26 @@ const Sidebar = () => {
     },
   ];
 
-  const handleNavigate = (path) => {
-    navigate(path);
-  };
-
   return (
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: DRAWER_WIDTH,
-        flexShrink: 0,
-        '& .MuiDrawer-paper': {
+    <>
+      <Drawer
+        variant={isTabletOrMobile ? "temporary" : "permanent"}
+        open={isTabletOrMobile ? mobileOpen : true}
+        onClose={onMobileClose}
+        ModalProps={{
+          keepMounted: true, // Better open performance on mobile.
+        }}
+        sx={{
           width: DRAWER_WIDTH,
-          boxSizing: 'border-box',
-          backgroundColor: '#f5f5f5',
-          borderRight: '1px solid #e0e0e0',
-        },
-      }}
-    >
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+            backgroundColor: '#f5f5f5',
+            borderRight: '1px solid #e0e0e0',
+          },
+        }}
+      >
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
         <Dashboard color="primary" />
         <Typography variant="h6" fontWeight="bold" color="primary">
@@ -124,6 +142,23 @@ const Sidebar = () => {
         </Typography>
       </Box>
       <Divider />
+      
+      {isInboxSection && onNewChatClick && (
+        <Box sx={{ p: 2, display: 'flex', justifyContent: 'center' }}>
+          <Fab
+            size="small"
+            color="primary"
+            onClick={onNewChatClick}
+            sx={{ 
+              minWidth: 40,
+              height: 40,
+            }}
+            title="Start new chat"
+          >
+            <AddIcon />
+          </Fab>
+        </Box>
+      )}
 
       <List sx={{ pt: 2 }}>
         {menuItems.map((section, index) => (
@@ -133,6 +168,7 @@ const Sidebar = () => {
                 <ListItemButton
                   onClick={() => handleNavigate(section.path)}
                   selected={isActive(section.path)}
+                  onMouseDown={(e) => e.stopPropagation()}
                   sx={{
                     mx: 1,
                     borderRadius: 1,
@@ -183,10 +219,11 @@ const Sidebar = () => {
                 <Collapse in={section.open} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
                     {section.items.map((item) => (
-                      <ListItem key={item.path} disablePadding>
-                        <ListItemButton
-                          onClick={() => handleNavigate(item.path)}
-                          selected={isActive(item.path)}
+                    <ListItem key={item.path} disablePadding>
+                      <ListItemButton
+                        onClick={() => handleNavigate(item.path)}
+                        selected={isActive(item.path)}
+                        onMouseDown={(e) => e.stopPropagation()}
                           sx={{
                             pl: 4,
                             mx: 1,
@@ -223,7 +260,8 @@ const Sidebar = () => {
           </React.Fragment>
         ))}
       </List>
-    </Drawer>
+      </Drawer>
+    </>
   );
 };
 

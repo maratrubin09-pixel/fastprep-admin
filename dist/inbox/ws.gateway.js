@@ -89,19 +89,31 @@ let WsGateway = class WsGateway {
      */
     async emitInboxEvent(threadId, event, payload) {
         const sockets = await this.server.fetchSockets();
+        console.log(`📡 Emitting ${event} for thread ${threadId} to ${sockets.length} connected sockets`);
+        let sentCount = 0;
+        let skippedCount = 0;
         for (const socket of sockets) {
             const data = socket.data;
-            if (!data)
+            if (!data) {
+                skippedCount++;
                 continue;
+            }
             const canView = await this.canViewThread(data, threadId);
             if (canView) {
                 socket.emit(event, payload);
+                sentCount++;
+                console.log(`✅ Sent ${event} to user ${data.userId}`);
+            }
+            else {
+                skippedCount++;
+                console.log(`⏭️ Skipped ${event} for user ${data.userId} (no permission)`);
             }
         }
+        console.log(`📊 Event ${event} summary: sent=${sentCount}, skipped=${skippedCount}`);
     }
     async canViewThread(data, threadId) {
         // Менеджер — всё
-        if (data.ep.permissions.includes('inbox.read_all')) {
+        if (data.ep.permissions.includes('inbox.read_all') || data.ep.permissions.includes('inbox.view')) {
             return true;
         }
         // Агент — назначено ему

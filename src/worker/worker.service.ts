@@ -148,7 +148,9 @@ export class WorkerService implements OnModuleDestroy {
       let result: { success: boolean; externalMessageId?: string; error?: string };
 
       if (platform === 'telegram') {
+        console.log(`📤 Calling sendViaTelegram: channelId=${channelId}, hasObjectKey=${!!msg.object_key}, objectKey=${msg.object_key || 'null'}, hasPeerId=${!!telegramPeerId}`);
         result = await this.sendViaTelegram(channelId, msg.text, telegramPeerId, msg.object_key);
+        console.log(`📤 sendViaTelegram result: success=${result.success}, error=${result.error || 'none'}`);
       } else {
         // Fallback to TG-Adapter for legacy
         result = await this.callTgAdapter(msg.conversation_id, msg.text, msg.object_key);

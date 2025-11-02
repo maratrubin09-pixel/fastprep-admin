@@ -836,6 +836,120 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return entity;
   }
 
+  /**
+   * Find and start a chat with a user by username or phone
+   * Returns user data for creating conversation
+   */
+  async findAndStartChat(username?: string, phone?: string): Promise<any> {
+    if (!this.client || !this.isReady) {
+      throw new Error('Telegram client not ready');
+    }
+
+    try {
+      let entity;
+      let userId: string | number | null = null;
+      let accessHash: string | null = null;
+      let firstName: string | null = null;
+      let lastName: string | null = null;
+      let userPhone: string | null = null;
+      let userUsername: string | null = null;
+
+      if (username) {
+        this.logger.log(`🔍 Searching for user by username: ${username}`);
+        // Remove @ if present
+        const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+        
+        try {
+          const result = await this.client.invoke(new Api.contacts.Search({
+            q: cleanUsername,
+            limit: 1,
+          }));
+
+          if (result.users && result.users.length > 0) {
+            const user = result.users[0] as any;
+            entity = user;
+            userId = user.id?.toString();
+            accessHash = user.accessHash?.toString();
+            firstName = user.firstName || null;
+            lastName = user.lastName || null;
+            userUsername = user.username || null;
+            userPhone = user.phone || null;
+            this.logger.log(`✅ Found user by username: ${firstName} ${lastName} (@${userUsername})`);
+          } else {
+            throw new Error(`User with username ${username} not found`);
+          }
+        } catch (error: any) {
+          this.logger.error(`❌ Error searching by username: ${error.message}`);
+          throw error;
+        }
+      } else if (phone) {
+        this.logger.log(`🔍 Importing contact by phone: ${phone}`);
+        try {
+          // Remove + and spaces from phone
+          const cleanPhone = phone.replace(/[+\s]/g, '');
+          
+          const result = await this.client.invoke(new Api.contacts.ImportContacts({
+            contacts: [new Api.InputPhoneContact({
+              clientId: bigInt(Date.now()),
+              phone: cleanPhone,
+              firstName: '',
+              lastName: '',
+            })],
+          }));
+
+          if (result.users && result.users.length > 0) {
+            const user = result.users[0] as any;
+            entity = user;
+            userId = user.id?.toString();
+            accessHash = user.accessHash?.toString();
+            firstName = user.firstName || null;
+            lastName = user.lastName || null;
+            userUsername = user.username || null;
+            userPhone = user.phone || cleanPhone || null;
+            this.logger.log(`✅ Found user by phone: ${firstName} ${lastName} (@${userUsername})`);
+          } else {
+            throw new Error(`User with phone ${phone} not found`);
+          }
+        } catch (error: any) {
+          this.logger.error(`❌ Error importing contact by phone: ${error.message}`);
+          throw error;
+        }
+      } else {
+        throw new Error('Either username or phone must be provided');
+      }
+
+      if (!userId) {
+        throw new Error('User ID not found');
+      }
+
+      // Create InputPeer for telegramPeerId
+      let telegramPeerId: string | null = null;
+      if (userId && accessHash) {
+        const serialized: any = {
+          _: 'InputPeerUser',
+          userId: String(userId),
+          accessHash: String(accessHash),
+        };
+        telegramPeerId = JSON.stringify(serialized);
+      }
+
+      // Return user data for creating conversation
+      return {
+        userId: String(userId),
+        accessHash: accessHash || null,
+        firstName,
+        lastName,
+        username: userUsername,
+        phone: userPhone,
+        telegramPeerId,
+        chatTitle: `${firstName || ''} ${lastName || ''}`.trim() || userUsername || userPhone || 'Unknown',
+      };
+    } catch (error: any) {
+      this.logger.error(`❌ Error in findAndStartChat: ${error.message}`);
+      throw error;
+    }
+  }
+
   async sendMessage(chatId: string | number, text: string, telegramPeerId?: string | null): Promise<any> {
     if (!this.client || !this.isReady) {
       throw new Error('Telegram client not ready');

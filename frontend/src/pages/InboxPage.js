@@ -25,14 +25,21 @@ import {
   Send as SendIcon,
   Done as DoneIcon,
   DoneAll as DoneAllIcon,
-  Delete as DeleteIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   AttachFile as AttachFileIcon,
+  ArrowBack as ArrowBackIcon,
+  Archive as ArchiveIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
 } from '@mui/icons-material';
+import { useMediaQuery as useMuiMediaQuery } from '@mui/material';
 import { io } from 'socket.io-client';
 import Linkify from 'linkify-react';
 import DashboardLayout from '../components/DashboardLayout';
 import FileUpload from '../components/FileUpload';
+import NewChatModal from '../components/NewChatModal';
+import { MOBILE_MAX, TABLET_MAX } from '../utils/breakpoints';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
@@ -210,6 +217,7 @@ const platformIcons = {
 };
 
 const InboxPage = () => {
+  const location = useLocation();
   const [conversations, setConversations] = useState([]);
   const [selectedThread, setSelectedThread] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -225,11 +233,29 @@ const InboxPage = () => {
   const selectedThreadRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  
+  // Responsive design
+  const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
+  const isTablet = useMuiMediaQuery(`(min-width: ${MOBILE_MAX + 1}px) and (max-width: ${TABLET_MAX}px)`);
+  const [showChat, setShowChat] = useState(false); // Для мобильных: показывать чат или список
+  
+  // Get platform from URL pathname
+  const getPlatformFromPath = () => {
+    const path = location.pathname;
+    if (path.includes('/whatsapp')) return 'whatsapp';
+    if (path.includes('/telegram')) return 'telegram';
+    if (path.includes('/instagram')) return 'instagram';
+    if (path.includes('/facebook')) return 'facebook';
+    return null; // 'All Messages' - no filter
+  };
 
-  // Fetch conversations on mount
+  // Fetch conversations on mount and when pathname changes
   useEffect(() => {
     fetchConversations();
-  }, []);
+  }, [location.pathname]);
 
   // Setup WebSocket connection (не зависит от selectedThread!)
   useEffect(() => {
@@ -480,7 +506,12 @@ const InboxPage = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/inbox/conversations`, {
+      const platform = getPlatformFromPath();
+      const url = platform 
+        ? `${API_URL}/api/inbox/conversations?platform=${platform}`
+        : `${API_URL}/api/inbox/conversations`;
+      
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -653,10 +684,63 @@ const InboxPage = () => {
     return date.toLocaleDateString();
   };
 
-  const handleDeleteConversation = async (convId, e) => {
-    e.stopPropagation(); // Предотвращаем выбор чата при клике на кнопку
+  const handleEditName = () => {
+    if (!selectedThread) return;
+    setEditedName(selectedThread.custom_name || selectedThread.chat_title || '');
+    setIsEditingName(true);
+  };
+
+  const handleSaveName = async () => {
+    if (!selectedThread) return;
     
-    if (!window.confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch(`${API_URL}/api/inbox/conversations/${selectedThread.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ custom_name: editedName.trim() || null }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update conversation name');
+      }
+
+      // Update local state
+      setSelectedThread({ ...selectedThread, custom_name: editedName.trim() || null });
+      setConversations(prev => prev.map(conv => 
+        conv.id === selectedThread.id 
+          ? { ...conv, custom_name: editedName.trim() || null }
+          : conv
+      ));
+      setIsEditingName(false);
+    } catch (err) {
+      alert('Failed to update conversation name: ' + err.message);
+    }
+  };
+
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const handleArchiveConversation = async () => {
+    if (!selectedThread) return;
+    
+    if (!window.confirm('Are you sure you want to archive this conversation?')) {
       return;
     }
 
@@ -666,33 +750,26 @@ const InboxPage = () => {
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch(`${API_URL}/api/inbox/conversations/${convId}`, {
-        method: 'DELETE',
+      const response = await fetch(`${API_URL}/api/inbox/conversations/${selectedThread.id}/archive`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
-        throw new Error('Failed to delete conversation');
+        throw new Error('Failed to archive conversation');
       }
 
-      const result = await response.json();
-      
-      // Удаляем чат из списка
-      setConversations(prev => prev.filter(conv => conv.id !== convId));
-      
-      // Если удаленный чат был выбран, снимаем выбор
-      if (selectedThread?.id === convId) {
-        setSelectedThread(null);
-        setMessages([]);
-      }
-
-      alert(result.message || 'Conversation deleted successfully');
+      // Remove from list and clear selection
+      setConversations(prev => prev.filter(conv => conv.id !== selectedThread.id));
+      setSelectedThread(null);
+      setMessages([]);
     } catch (err) {
-      alert('Failed to delete conversation: ' + err.message);
+      alert('Failed to archive conversation: ' + err.message);
     }
   };
+
 
   if (loading) {
     return (
@@ -740,12 +817,36 @@ const InboxPage = () => {
     );
   }
 
+  const handleNewChatSuccess = (conversation) => {
+    // Add to conversations list and select it
+    setConversations(prev => [conversation, ...prev]);
+    setSelectedThread(conversation);
+    if (isMobile) {
+      setShowChat(true);
+    }
+  };
+
   return (
-    <DashboardLayout title="Unified Inbox">
+    <DashboardLayout title="Unified Inbox" onNewChatClick={() => setNewChatModalOpen(true)}>
       {showErrorAlert}
-      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 200px)' }}>
+      <NewChatModal
+        open={newChatModalOpen}
+        onClose={() => setNewChatModalOpen(false)}
+        onSuccess={handleNewChatSuccess}
+      />
+      <Box sx={{ 
+        display: 'flex', 
+        gap: 2, 
+        height: 'calc(100vh - 200px)',
+        flexDirection: isMobile && showChat ? 'column' : 'row',
+      }}>
         {/* Conversations List */}
-        <Paper sx={{ width: '350px', overflow: 'auto' }}>
+        <Paper sx={{ 
+          width: isMobile ? '100%' : isTablet ? '300px' : '350px',
+          overflow: 'auto',
+          display: isMobile && showChat ? 'none' : 'block',
+          height: isMobile ? '100%' : 'auto',
+        }}>
           <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
             <Typography variant="h6" fontWeight="bold">
               Conversations
@@ -759,7 +860,12 @@ const InboxPage = () => {
                   <ListItem
                     button
                     selected={selectedThread?.id === conv.id}
-                    onClick={() => setSelectedThread(conv)}
+                    onClick={() => {
+                      setSelectedThread(conv);
+                      if (isMobile) {
+                        setShowChat(true); // На мобильных показываем чат
+                      }
+                    }}
                     sx={{
                       '&.Mui-selected': {
                         backgroundColor: '#E8EAF6', // Очень светло-фиолетовый вместо яркого
@@ -771,22 +877,6 @@ const InboxPage = () => {
                       backgroundColor: conv.unread_count > 0 ? 'action.hover' : 'transparent',
                       fontWeight: conv.unread_count > 0 ? 'bold' : 'normal',
                     }}
-                    secondaryAction={
-                      <IconButton
-                        edge="end"
-                        aria-label="delete"
-                        onClick={(e) => handleDeleteConversation(conv.id, e)}
-                        sx={{ 
-                          color: 'error.main',
-                          '&:hover': {
-                            backgroundColor: 'error.light',
-                            color: 'error.dark',
-                          },
-                        }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    }
                   >
                     <ListItemAvatar>
                       <Avatar>
@@ -797,7 +887,7 @@ const InboxPage = () => {
                       primary={
                         <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
                           <Typography variant="subtitle1" fontWeight="bold">
-                            {conv.chat_title || conv.external_chat_id || 'Unknown'}
+                            {conv.custom_name || conv.chat_title || conv.external_chat_id || 'Unknown'}
                           </Typography>
                           <Chip
                             label={platform}
@@ -831,23 +921,103 @@ const InboxPage = () => {
         </Paper>
 
         {/* Messages Area */}
-        <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <Paper sx={{ 
+          flex: 1, 
+          display: isMobile && !showChat ? 'none' : 'flex',
+          flexDirection: 'column',
+          position: isMobile ? 'fixed' : 'relative',
+          top: isMobile ? 0 : 'auto',
+          left: isMobile ? 0 : 'auto',
+          right: isMobile ? 0 : 'auto',
+          bottom: isMobile ? 0 : 'auto',
+          width: isMobile ? '100%' : 'auto',
+          height: isMobile ? '100vh' : 'auto',
+          zIndex: isMobile ? 1300 : 'auto',
+        }}>
           {selectedThread ? (
             <>
               {/* Header */}
               <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Box display="flex" alignItems="center" gap={1}>
+                  {isMobile && (
+                    <IconButton
+                      onClick={() => {
+                        setShowChat(false);
+                        setSelectedThread(null);
+                      }}
+                      sx={{ mr: 1 }}
+                    >
+                      <ArrowBackIcon />
+                    </IconButton>
+                  )}
                   <Avatar>
                     {platformIcons[getPlatformFromChannelId(selectedThread.channel_id)] || '💬'}
                   </Avatar>
-                  <Box>
-                    <Typography variant="h6" fontWeight="bold">
-                      {selectedThread.chat_title || selectedThread.external_chat_id || 'Unknown'}
-                    </Typography>
+                  <Box sx={{ flex: 1 }}>
+                    {isEditingName ? (
+                      <TextField
+                        value={editedName}
+                        onChange={(e) => setEditedName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveName();
+                          } else if (e.key === 'Escape') {
+                            handleCancelEditName();
+                          }
+                        }}
+                        size="small"
+                        autoFocus
+                        sx={{ mb: 0.5 }}
+                      />
+                    ) : (
+                      <Typography 
+                        variant="h6" 
+                        fontWeight="bold"
+                        sx={{ cursor: 'pointer', '&:hover': { opacity: 0.7 } }}
+                        onClick={handleEditName}
+                      >
+                        {selectedThread.custom_name || selectedThread.chat_title || selectedThread.external_chat_id || 'Unknown'}
+                      </Typography>
+                    )}
                     <Typography variant="caption" color="text.secondary">
                       {selectedThread.channel_id}
                     </Typography>
                   </Box>
+                  {isEditingName ? (
+                    <>
+                      <IconButton
+                        onClick={handleSaveName}
+                        sx={{ color: 'primary.main' }}
+                        title="Save"
+                      >
+                        <SaveIcon />
+                      </IconButton>
+                      <IconButton
+                        onClick={handleCancelEditName}
+                        sx={{ color: 'text.secondary' }}
+                        title="Cancel"
+                      >
+                        <CancelIcon />
+                      </IconButton>
+                    </>
+                  ) : (
+                    <>
+                      <IconButton
+                        onClick={handleEditName}
+                        sx={{ color: 'text.secondary' }}
+                        title="Edit name"
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        onClick={handleArchiveConversation}
+                        sx={{ color: 'text.secondary' }}
+                        title="Archive conversation"
+                      >
+                        <ArchiveIcon />
+                      </IconButton>
+                    </>
+                  )}
                 </Box>
               </Box>
 
@@ -1051,12 +1221,7 @@ const InboxPage = () => {
                     placeholder="Type a message..."
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
+                    onKeyDown={handleKeyDown}
                     multiline
                     maxRows={4}
                   />

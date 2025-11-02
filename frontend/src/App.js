@@ -9,6 +9,8 @@ import UserManagementPage from './pages/UserManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import MessengerSettingsPage from './pages/MessengerSettingsPage';
 import InboxPage from './pages/InboxPage';
+import ArchivePage from './pages/ArchivePage';
+import TrashPage from './pages/TrashPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import PrivateRoute from './components/PrivateRoute';
 
@@ -95,10 +97,26 @@ function App() {
             }
           />
           <Route
+            path="/messages/archive"
+            element={
+              <PrivateRoute>
+                <ArchivePage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/messages/trash"
+            element={
+              <PrivateRoute>
+                <TrashPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/messages/whatsapp"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="WhatsApp Messages" description="Manage WhatsApp conversations" />
+                <InboxPage />
               </PrivateRoute>
             }
           />
@@ -106,7 +124,7 @@ function App() {
             path="/messages/telegram"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="Telegram Messages" description="Manage Telegram conversations" />
+                <InboxPage />
               </PrivateRoute>
             }
           />
@@ -114,7 +132,7 @@ function App() {
             path="/messages/instagram"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="Instagram Messages" description="Manage Instagram DMs" />
+                <InboxPage />
               </PrivateRoute>
             }
           />
@@ -122,7 +140,7 @@ function App() {
             path="/messages/facebook"
             element={
               <PrivateRoute>
-                <PlaceholderPage title="Facebook Messages" description="Manage Facebook Messenger" />
+                <InboxPage />
               </PrivateRoute>
             }
           />

@@ -196,7 +196,7 @@ export class InboxService {
         // If thread was deleted, restore it
         if (isDeleted) {
           await client.query(
-            `UPDATE conversations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1`,
+            `UPDATE conversations SET deleted_at = NULL, is_deleted = false, updated_at = NOW() WHERE id = $1`,
             [foundThread.id]
           );
           // Re-add to Redis unassigned set if it was removed
@@ -415,16 +415,81 @@ export class InboxService {
   }
 
   /**
-   * Get all conversations ordered by last activity (excluding deleted)
+   * Get all conversations ordered by last activity (excluding deleted and archived)
+   * @param platform Optional platform filter (e.g., 'telegram', 'whatsapp')
    */
-  async getAllConversations(): Promise<any[]> {
+  async getAllConversations(platform?: string): Promise<any[]> {
+    let query = `SELECT * FROM conversations 
+       WHERE (deleted_at IS NULL OR is_deleted = false) AND is_archived = false`;
+    const params: any[] = [];
+    
+    if (platform) {
+      query += ` AND channel_id LIKE $${params.length + 1}`;
+      params.push(`${platform}:%`);
+    }
+    
+    query += ` ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT 100`;
+    
+    const result = await this.pool.query(query, params);
+    return result.rows;
+  }
+
+  /**
+   * Get archived conversations ordered by last activity
+   */
+  async getArchivedConversations(): Promise<any[]> {
     const result = await this.pool.query(
       `SELECT * FROM conversations 
-       WHERE deleted_at IS NULL
+       WHERE is_archived = true AND (deleted_at IS NULL OR is_deleted = false)
        ORDER BY COALESCE(last_message_at, created_at) DESC
        LIMIT 100`
     );
     return result.rows;
+  }
+
+  /**
+   * Get deleted conversations (trash)
+   */
+  async getDeletedConversations(): Promise<any[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM conversations 
+       WHERE is_deleted = true OR deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC
+       LIMIT 100`
+    );
+    return result.rows;
+  }
+
+  /**
+   * Restore a deleted conversation
+   */
+  async restoreConversation(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversations SET is_deleted = false, deleted_at = NULL, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+  }
+
+  /**
+   * Archive a conversation
+   */
+  async archiveConversation(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversations SET is_archived = true, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+  }
+
+  /**
+   * Update conversation (e.g., custom_name)
+   */
+  async updateConversation(id: string, updates: { custom_name?: string }): Promise<void> {
+    if (updates.custom_name !== undefined) {
+      await this.pool.query(
+        `UPDATE conversations SET custom_name = $1, updated_at = NOW() WHERE id = $2`,
+        [updates.custom_name, id]
+      );
+    }
   }
 
   /**
@@ -452,7 +517,7 @@ export class InboxService {
       // Soft delete conversation (mark as deleted)
       const result = await client.query(
         `UPDATE conversations 
-         SET deleted_at = NOW(), updated_at = NOW() 
+         SET deleted_at = NOW(), is_deleted = true, updated_at = NOW() 
          WHERE id = $1 AND deleted_at IS NULL
          RETURNING id, channel_id`,
         [conversationId]

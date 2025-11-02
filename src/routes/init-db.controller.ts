@@ -53,10 +53,27 @@ export class InitDbController {
       await this.pool.query(`
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
       `);
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
+      `);
       
       // Добавить колонку для непрочитанных сообщений
       await this.pool.query(`
         ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unread_count INT NOT NULL DEFAULT 0;
+      `);
+
+      // Добавить колонку для архивации
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT false;
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_conversations_is_archived 
+        ON conversations(is_archived) WHERE is_archived = true;
+      `);
+
+      // Добавить колонку для кастомного имени
+      await this.pool.query(`
+        ALTER TABLE conversations ADD COLUMN IF NOT EXISTS custom_name VARCHAR(500);
       `);
 
       // Добавить индексы для поиска по идентификаторам

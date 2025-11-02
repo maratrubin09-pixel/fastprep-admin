@@ -14,7 +14,8 @@
     "lint": "echo 'lint stub'",
     "test": "echo 'tests stub'",
     "start:worker": "node dist/worker/main.js",
-    "start:tg-login": "node dist/scripts/telegram-login.js"
+    "start:tg-login": "node dist/scripts/telegram-login.js",
+    "backup": "node scripts/backup.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.653.0",

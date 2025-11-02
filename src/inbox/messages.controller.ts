@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Delete, Param, Body, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Query, BadRequestException, Req, UseGuards, Inject, forwardRef } from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
+import { TelegramService } from '../messengers/telegram/telegram.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
 
 // Расширенный список разрешенных типов (должен совпадать с uploads.controller.ts)
@@ -31,23 +32,42 @@ class SendMessageDto {
 export class MessagesController {
   constructor(
     private s3: S3Service,
-    private inbox: InboxService
+    private inbox: InboxService,
+    @Inject(forwardRef(() => TelegramService))
+    private telegramService: TelegramService
   ) {}
 
   /**
    * GET /api/inbox/conversations
-   * Get all conversations for the current user
+   * Get all conversations for the current user (excluding archived)
+   * @query platform Optional platform filter (e.g., 'telegram', 'whatsapp')
    */
   @Get('conversations')
   @UseGuards(PepGuard)
   @RequirePerm('inbox.view')
-  async getConversations(@Req() req: any) {
+  async getConversations(@Req() req: any, @Query('platform') platform?: string) {
     const userId = req.user?.id;
     if (!userId) {
       throw new BadRequestException('User not authenticated');
     }
     
-    return await this.inbox.getAllConversations();
+    return await this.inbox.getAllConversations(platform);
+  }
+
+  /**
+   * GET /api/inbox/conversations/archived
+   * Get all archived conversations
+   */
+  @Get('conversations/archived')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getArchivedConversations(@Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    return await this.inbox.getArchivedConversations();
   }
 
   /**
@@ -136,8 +156,120 @@ export class MessagesController {
   }
 
   /**
+   * POST /api/inbox/conversations/:id/archive
+   * Archive a conversation
+   */
+  @Post('conversations/:id/archive')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async archiveConversation(@Param('id') threadId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    await this.inbox.archiveConversation(threadId);
+    return { success: true };
+  }
+
+  /**
+   * PUT /api/inbox/conversations/:id
+   * Update conversation (e.g., custom_name)
+   */
+  @Put('conversations/:id')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async updateConversation(@Param('id') threadId: string, @Body() body: { custom_name?: string }, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    await this.inbox.updateConversation(threadId, body);
+    return { success: true };
+  }
+
+  /**
+   * POST /api/inbox/telegram/find-and-start
+   * Find and start a Telegram chat by username or phone
+   */
+  @Post('telegram/find-and-start')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.send_message')
+  async findAndStartChat(@Body() body: { username?: string; phone?: string }, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    if (!body.username && !body.phone) {
+      throw new BadRequestException('Either username or phone must be provided');
+    }
+
+    try {
+      // Find user in Telegram
+      const userData = await this.telegramService.findAndStartChat(body.username, body.phone);
+
+      // Create or find conversation thread
+      const channelId = `telegram:${userData.userId}`;
+      const thread = await this.inbox.findOrCreateThread({
+        channel_id: channelId,
+        platform: 'telegram',
+        chat_title: userData.chatTitle,
+        chat_type: 'private',
+        telegram_peer_id: userData.telegramPeerId,
+        sender_phone: userData.phone,
+        sender_username: userData.username,
+        sender_first_name: userData.firstName,
+        sender_last_name: userData.lastName,
+      });
+
+      return {
+        success: true,
+        conversation: thread,
+        user: userData,
+      };
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Failed to find and start chat');
+    }
+  }
+
+  /**
+   * GET /api/inbox/conversations/trash
+   * Get all deleted conversations
+   */
+  @Get('conversations/trash')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getDeletedConversations(@Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    return await this.inbox.getDeletedConversations();
+  }
+
+  /**
+   * POST /api/inbox/conversations/:id/restore
+   * Restore a deleted conversation
+   */
+  @Post('conversations/:id/restore')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async restoreConversation(@Param('id') threadId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    
+    await this.inbox.restoreConversation(threadId);
+    return { success: true };
+  }
+
+  /**
    * DELETE /api/inbox/conversations/:id
-   * Удалить чат (для ручного удаления "Unknown" чатов)
+   * Удалить чат (soft delete для корзины)
    */
   @Delete('conversations/:id')
   @UseGuards(PepGuard)
