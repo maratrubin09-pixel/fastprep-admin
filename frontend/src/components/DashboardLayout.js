@@ -6,7 +6,7 @@ import ProfileMenu from './ProfileMenu';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
 
-const DashboardLayout = ({ children, title = 'Dashboard' }) => {
+const DashboardLayout = ({ children, title = 'Dashboard', onNewChatClick }) => {
   const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isTabletOrMobile = useMediaQuery('(max-width: 1024px)');
