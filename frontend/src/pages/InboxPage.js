@@ -457,24 +457,41 @@ const InboxPage = () => {
       // При первой загрузке - СРАЗУ устанавливаем позицию внизу БЕЗ анимации
       // Используем несколько попыток для гарантии, но без видимой прокрутки
       const setToBottom = () => {
-        if (messagesContainerRef.current) {
+        if (messagesContainerRef.current && messagesEndRef.current) {
           const c = messagesContainerRef.current;
           // Сразу устанавливаем scrollTop в конец - без анимации
-          c.scrollTop = c.scrollHeight;
+          const targetScroll = c.scrollHeight;
+          c.scrollTop = targetScroll;
+          
+          // Принудительно через scrollIntoView с behavior: 'auto'
+          try {
+            messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end', inline: 'nearest' });
+          } catch (e) {
+            // Fallback если scrollIntoView не поддерживается
+            c.scrollTop = targetScroll;
+          }
+          
           // Обновляем состояние кнопки
           const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
           setShowScrollToBottom(dFromBottom >= 100);
         }
       };
 
-      // Первая попытка - сразу
-      setToBottom();
-
-      // Вторая попытка - после небольшой задержки для гарантии
-      setTimeout(setToBottom, 50);
-      // Третья попытка - после рендера
+      // Первая попытка - после рендера (увеличено время для гарантии что DOM готов)
       requestAnimationFrame(() => {
-        setTimeout(setToBottom, 50);
+        setToBottom();
+        
+        // Вторая попытка - через 100ms
+        setTimeout(setToBottom, 100);
+        
+        // Третья попытка - через 300ms
+        setTimeout(setToBottom, 300);
+        
+        // Четвертая попытка - через 500ms (на случай медленного рендера)
+        setTimeout(setToBottom, 500);
+        
+        // Пятая попытка - через 800ms (для очень медленных случаев)
+        setTimeout(setToBottom, 800);
       });
     } else if (isNewIncomingMessage || isNearBottom) {
       // Для новых сообщений или если пользователь внизу - используем плавную прокрутку
@@ -574,7 +591,7 @@ const InboxPage = () => {
       // Дополнительно используем scrollIntoView
       setTimeout(() => {
         if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
         }
         // Обновляем состояние кнопки после прокрутки
         setTimeout(() => {
@@ -583,10 +600,10 @@ const InboxPage = () => {
             const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
             setShowScrollToBottom(dFromBottom >= 100);
           }
-        }, 100);
+        }, 150);
       }, 50);
     } else if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
       // Обновляем состояние кнопки
       setTimeout(() => {
         if (messagesContainerRef.current) {
@@ -594,7 +611,7 @@ const InboxPage = () => {
           const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
           setShowScrollToBottom(dFromBottom >= 100);
         }
-      }, 100);
+      }, 150);
     }
   };
 
