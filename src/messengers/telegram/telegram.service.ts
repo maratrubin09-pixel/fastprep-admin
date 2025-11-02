@@ -741,22 +741,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (telegramPeerId) {
       try {
         const parsed = JSON.parse(telegramPeerId);
-        this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}`);
+        this.logger.log(`🔧 Reconstructing InputPeer: ${parsed._}, userId=${parsed.userId || 'N/A'}, accessHash=${parsed.accessHash || 'N/A'}`);
         
-        // Воссоздаем InputPeer из сохраненных данных
+        // Проверяем валидность accessHash перед использованием
         if (parsed._ === 'InputPeerUser') {
+          // Если accessHash отсутствует или равен '0', это невалидный telegramPeerId
+          if (!parsed.accessHash || parsed.accessHash === '0' || parsed.accessHash === 0 || String(parsed.accessHash).trim() === '0') {
+            this.logger.warn(`⚠️ Invalid telegramPeerId: accessHash is missing or '0' (value: ${parsed.accessHash}), ignoring and trying getDialogs`);
+            throw new Error('Invalid accessHash');
+          }
           entity = new Api.InputPeerUser({
             userId: bigInt(parsed.userId),
-            accessHash: bigInt(parsed.accessHash || '0'),
+            accessHash: bigInt(parsed.accessHash),
           });
         } else if (parsed._ === 'InputPeerChat') {
           entity = new Api.InputPeerChat({
             chatId: bigInt(parsed.chatId),
           });
         } else if (parsed._ === 'InputPeerChannel') {
+          // Если accessHash отсутствует или равен '0', это невалидный telegramPeerId
+          if (!parsed.accessHash || parsed.accessHash === '0' || parsed.accessHash === 0 || String(parsed.accessHash).trim() === '0') {
+            this.logger.warn(`⚠️ Invalid telegramPeerId: accessHash is missing or '0' (value: ${parsed.accessHash}), ignoring and trying getDialogs`);
+            throw new Error('Invalid accessHash');
+          }
           entity = new Api.InputPeerChannel({
             channelId: bigInt(parsed.channelId),
-            accessHash: bigInt(parsed.accessHash || '0'),
+            accessHash: bigInt(parsed.accessHash),
           });
         } else {
           throw new Error(`Unknown InputPeer type: ${parsed._}`);
