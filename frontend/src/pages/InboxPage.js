@@ -422,10 +422,9 @@ const InboxPage = () => {
   }, [selectedThread]);
 
   // Автопрокрутка при загрузке сообщений или новых сообщениях
-  // Всегда прокручиваем к последнему сообщению при:
-  // 1. Загрузке сообщений чата впервые (смена selectedThread) - ВСЕГДА
-  // 2. Новых входящих сообщениях (через WebSocket) - ВСЕГДА
-  // Для остальных случаев (пользователь прокрутил вверх) - только если он уже внизу
+  // При первой загрузке чата - сразу устанавливаем позицию внизу БЕЗ прокрутки
+  // При новых входящих сообщениях - прокручиваем к ним
+  // Для остальных случаев - только если пользователь уже внизу
   useEffect(() => {
     if (!messagesContainerRef.current || messages.length === 0 || !selectedThread) {
       // Сбрасываем состояние кнопки если нет сообщений
@@ -454,70 +453,80 @@ const InboxPage = () => {
     prevMessagesLengthRef.current = currentMessagesLength;
     prevSelectedThreadIdRef.current = selectedThread.id;
 
-    // Всегда прокручиваем если:
-    // 1. Это первая загрузка чата - ВСЕГДА
-    // 2. Новое входящее сообщение - ВСЕГДА
-    // 3. Пользователь уже внизу
-    const shouldScroll = isFirstLoad || isNewIncomingMessage || isNearBottom;
+    if (isFirstLoad) {
+      // При первой загрузке - СРАЗУ устанавливаем позицию внизу БЕЗ анимации
+      // Используем несколько попыток для гарантии, но без видимой прокрутки
+      const setToBottom = () => {
+        if (messagesContainerRef.current) {
+          const c = messagesContainerRef.current;
+          // Сразу устанавливаем scrollTop в конец - без анимации
+          c.scrollTop = c.scrollHeight;
+          // Обновляем состояние кнопки
+          const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+          setShowScrollToBottom(dFromBottom >= 100);
+        }
+      };
 
-    if (shouldScroll && messagesEndRef.current) {
-      // Используем несколько попыток для гарантии
+      // Первая попытка - сразу
+      setToBottom();
+
+      // Вторая попытка - после небольшой задержки для гарантии
+      setTimeout(setToBottom, 50);
+      // Третья попытка - после рендера
       requestAnimationFrame(() => {
-        setTimeout(() => {
-          if (messagesEndRef.current && messagesContainerRef.current) {
-            const container = messagesContainerRef.current;
-            // Для первой загрузки используем 'auto' (быстрее), для остальных - 'smooth'
-            const behavior = isFirstLoad ? 'auto' : 'smooth';
-            // Сначала прокручиваем через scrollTop (более надежно)
-            container.scrollTop = container.scrollHeight;
-            // Затем через scrollIntoView как дополнительная гарантия
-            setTimeout(() => {
-              if (messagesEndRef.current) {
-                messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
-              }
-              // Обновляем состояние кнопки после прокрутки
-              if (messagesContainerRef.current) {
-                const c = messagesContainerRef.current;
-                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
-                setShowScrollToBottom(dFromBottom >= 100);
-              }
-            }, isFirstLoad ? 100 : 100);
-          } else if (messagesEndRef.current) {
-            const behavior = isFirstLoad ? 'auto' : 'smooth';
-            messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
-            // Обновляем состояние кнопки
-            setTimeout(() => {
-              if (messagesContainerRef.current) {
-                const c = messagesContainerRef.current;
-                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
-                setShowScrollToBottom(dFromBottom >= 100);
-              }
-            }, 100);
-          }
-        }, isFirstLoad ? 200 : 100);
-
-        // Вторая попытка для гарантии
-        setTimeout(() => {
-          if (messagesContainerRef.current) {
-            const container = messagesContainerRef.current;
-            container.scrollTop = container.scrollHeight;
-            // Обновляем состояние кнопки после прокрутки
-            const dFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-            setShowScrollToBottom(dFromBottom >= 100);
-          } else if (messagesEndRef.current) {
-            const behavior = isFirstLoad ? 'auto' : 'smooth';
-            messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
-            // Обновляем состояние кнопки
-            setTimeout(() => {
-              if (messagesContainerRef.current) {
-                const c = messagesContainerRef.current;
-                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
-                setShowScrollToBottom(dFromBottom >= 100);
-              }
-            }, 100);
-          }
-        }, isFirstLoad ? 500 : 300);
+        setTimeout(setToBottom, 50);
       });
+    } else if (isNewIncomingMessage || isNearBottom) {
+      // Для новых сообщений или если пользователь внизу - используем плавную прокрутку
+      if (messagesEndRef.current) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (messagesEndRef.current && messagesContainerRef.current) {
+              const container = messagesContainerRef.current;
+              container.scrollTop = container.scrollHeight;
+              setTimeout(() => {
+                if (messagesEndRef.current) {
+                  messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                }
+                // Обновляем состояние кнопки после прокрутки
+                if (messagesContainerRef.current) {
+                  const c = messagesContainerRef.current;
+                  const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                  setShowScrollToBottom(dFromBottom >= 100);
+                }
+              }, 50);
+            } else if (messagesEndRef.current) {
+              messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+              setTimeout(() => {
+                if (messagesContainerRef.current) {
+                  const c = messagesContainerRef.current;
+                  const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                  setShowScrollToBottom(dFromBottom >= 100);
+                }
+              }, 100);
+            }
+          }, 100);
+
+          // Вторая попытка для гарантии
+          setTimeout(() => {
+            if (messagesContainerRef.current) {
+              const container = messagesContainerRef.current;
+              container.scrollTop = container.scrollHeight;
+              const dFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+              setShowScrollToBottom(dFromBottom >= 100);
+            } else if (messagesEndRef.current) {
+              messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+              setTimeout(() => {
+                if (messagesContainerRef.current) {
+                  const c = messagesContainerRef.current;
+                  const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                  setShowScrollToBottom(dFromBottom >= 100);
+                }
+              }, 100);
+            }
+          }, 300);
+        });
+      }
     } else {
       // Если не прокручиваем, обновляем состояние кнопки
       setShowScrollToBottom(distanceFromBottom >= 100);
@@ -1117,6 +1126,8 @@ const InboxPage = () => {
                   p: 2, 
                   position: 'relative',
                   backgroundColor: '#F8F9FA', // Очень светло-серый фон для области чата
+                  scrollBehavior: 'auto', // Отключаем плавную прокрутку по умолчанию
+                  overflowAnchor: 'none', // Отключаем автоматическую прокрутку браузера
                 }}
               >
                 {showScrollToBottom && (
