@@ -420,7 +420,7 @@ export class InboxService {
    */
   async getAllConversations(platform?: string): Promise<any[]> {
     let query = `SELECT * FROM conversations 
-       WHERE (deleted_at IS NULL OR is_deleted = false) AND is_archived = false`;
+       WHERE (deleted_at IS NULL OR is_deleted = false OR is_deleted IS NULL) AND (is_archived = false OR is_archived IS NULL)`;
     const params: any[] = [];
     
     if (platform) {
@@ -440,7 +440,7 @@ export class InboxService {
   async getArchivedConversations(): Promise<any[]> {
     const result = await this.pool.query(
       `SELECT * FROM conversations 
-       WHERE is_archived = true AND (deleted_at IS NULL OR is_deleted = false)
+       WHERE is_archived = true AND (deleted_at IS NULL OR is_deleted = false OR is_deleted IS NULL)
        ORDER BY COALESCE(last_message_at, created_at) DESC
        LIMIT 100`
     );
