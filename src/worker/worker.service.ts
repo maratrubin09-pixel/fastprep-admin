@@ -116,9 +116,21 @@ export class WorkerService implements OnModuleDestroy {
   private async processOne(row: OutboxRow) {
     const client = await this.pool.connect();
     try {
-      // Получить данные сообщения (включая reply_to)
+      // Получить данные сообщения (включая reply_to, если колонка существует)
+      // Проверяем существование колонки
+      const checkColumnRes = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'reply_to'
+      `);
+      const hasReplyToColumn = checkColumnRes.rows.length > 0;
+      
+      const selectFields = hasReplyToColumn 
+        ? 'conversation_id, text, object_key, reply_to'
+        : 'conversation_id, text, object_key';
+      
       const msgRes = await client.query(
-        `SELECT conversation_id, text, object_key, reply_to FROM messages WHERE id = $1`,
+        `SELECT ${selectFields} FROM messages WHERE id = $1`,
         [row.message_id]
       );
       if (msgRes.rows.length === 0) {
@@ -130,7 +142,8 @@ export class WorkerService implements OnModuleDestroy {
       }
 
       const msg = msgRes.rows[0];
-      console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, replyTo=${msg.reply_to || 'null'}`);
+      const replyTo = hasReplyToColumn ? (msg.reply_to || null) : null;
+      console.log(`📨 Processing message: id=${row.message_id}, conversation_id=${msg.conversation_id}, hasObjectKey=${!!msg.object_key}, replyTo=${replyTo || 'null'}`);
 
       // Определяем платформу из channel_id и получаем telegram_peer_id
       const convRes = await client.query(
@@ -143,14 +156,14 @@ export class WorkerService implements OnModuleDestroy {
 
       // Если есть reply_to, получаем external_message_id исходного сообщения
       let replyToExternalId: number | null = null;
-      if (msg.reply_to && platform === 'telegram') {
+      if (hasReplyToColumn && replyTo && platform === 'telegram') {
         const replyMsgRes = await client.query(
           `SELECT external_message_id FROM messages WHERE id = $1`,
-          [msg.reply_to]
+          [replyTo]
         );
         if (replyMsgRes.rows[0]?.external_message_id) {
           replyToExternalId = parseInt(replyMsgRes.rows[0].external_message_id, 10);
-          console.log(`📎 Reply to message ${msg.reply_to}, external_message_id=${replyToExternalId}`);
+          console.log(`📎 Reply to message ${replyTo}, external_message_id=${replyToExternalId}`);
         }
       }
 

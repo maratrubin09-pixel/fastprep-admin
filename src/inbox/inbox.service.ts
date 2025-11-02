@@ -92,13 +92,28 @@ export class InboxService {
     try {
       await client.query('BEGIN');
 
-      console.log(`🔍 About to insert message: threadId=${threadId}, senderId=${senderId}, textLength=${text?.length || 0}, objectKey=${objectKey || 'NULL'}, replyTo=${replyTo || 'NULL'}`);
-      const msgRes = await client.query(
-        `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, reply_to, delivery_status, created_at, updated_at)
-         VALUES ($1, $2, 'out', $3, $4, $5, 'queued', NOW(), NOW())
-         RETURNING *`,
-        [threadId, senderId, text || '', objectKey || null, replyTo || null]
-      );
+      // Проверяем, существует ли колонка reply_to
+      const hasReplyToColumn = await this.hasReplyToColumn();
+
+      console.log(`🔍 About to insert message: threadId=${threadId}, senderId=${senderId}, textLength=${text?.length || 0}, objectKey=${objectKey || 'NULL'}, replyTo=${replyTo || 'NULL'}, hasReplyToColumn=${hasReplyToColumn}`);
+      
+      let msgRes;
+      if (hasReplyToColumn) {
+        msgRes = await client.query(
+          `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, reply_to, delivery_status, created_at, updated_at)
+           VALUES ($1, $2, 'out', $3, $4, $5, 'queued', NOW(), NOW())
+           RETURNING *`,
+          [threadId, senderId, text || '', objectKey || null, replyTo || null]
+        );
+      } else {
+        // Если колонки нет, вставляем без reply_to
+        msgRes = await client.query(
+          `INSERT INTO messages (conversation_id, sender_id, direction, text, object_key, delivery_status, created_at, updated_at)
+           VALUES ($1, $2, 'out', $3, $4, 'queued', NOW(), NOW())
+           RETURNING *`,
+          [threadId, senderId, text || '', objectKey || null]
+        );
+      }
       const message = msgRes.rows[0];
       console.log(`✅ Message created: id=${message.id}, threadId=${threadId}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}, textLength=${message.text?.length || 0}`);
 
@@ -507,25 +522,53 @@ export class InboxService {
     return result.rows[0] || null;
   }
 
+  /**
+   * Проверка существования колонки reply_to в таблице messages
+   */
+  async hasReplyToColumn(): Promise<boolean> {
+    const result = await this.pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'messages' AND column_name = 'reply_to'
+    `);
+    return result.rows.length > 0;
+  }
+
   async getMessages(conversationId: string): Promise<any[]> {
-    const result = await this.pool.query(
-      `SELECT 
-        m.*,
-        r.id as reply_to_id,
-        r.text as reply_to_text,
-        r.sender_name as reply_to_sender_name,
-        r.direction as reply_to_direction,
-        r.created_at as reply_to_created_at
-       FROM messages m
-       LEFT JOIN messages r ON m.reply_to = r.id
-       WHERE m.conversation_id = $1 
-       ORDER BY m.created_at ASC`,
-      [conversationId]
-    );
+    // Сначала проверяем, существует ли колонка reply_to
+    const hasReplyToColumn = await this.hasReplyToColumn();
+
+    let result;
+    if (hasReplyToColumn) {
+      // Если колонка существует, делаем JOIN с reply_to
+      result = await this.pool.query(
+        `SELECT 
+          m.*,
+          r.id as reply_to_id,
+          r.text as reply_to_text,
+          r.sender_name as reply_to_sender_name,
+          r.direction as reply_to_direction,
+          r.created_at as reply_to_created_at
+         FROM messages m
+         LEFT JOIN messages r ON m.reply_to = r.id
+         WHERE m.conversation_id = $1 
+         ORDER BY m.created_at ASC`,
+        [conversationId]
+      );
+    } else {
+      // Если колонки нет, делаем простой SELECT без JOIN
+      result = await this.pool.query(
+        `SELECT * FROM messages 
+         WHERE conversation_id = $1 
+         ORDER BY created_at ASC`,
+        [conversationId]
+      );
+    }
+
     // Преобразуем результат для удобства frontend
     return result.rows.map(row => ({
       ...row,
-      reply_to_message: row.reply_to_id ? {
+      reply_to_message: hasReplyToColumn && row.reply_to_id ? {
         id: row.reply_to_id,
         text: row.reply_to_text,
         sender_name: row.reply_to_sender_name,

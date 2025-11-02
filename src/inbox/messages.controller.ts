@@ -146,10 +146,18 @@ export class MessagesController {
 
     // Валидация reply_to (если указан)
     if (dto.replyTo) {
-      // Проверяем, что сообщение существует и принадлежит этому чату
-      const replyMessage = await this.inbox.getMessage(dto.replyTo);
-      if (!replyMessage || replyMessage.conversation_id !== threadId) {
-        throw new BadRequestException('Reply message not found or belongs to different conversation');
+      // Проверяем, что колонка reply_to существует
+      const hasReplyToColumn = await this.inbox.hasReplyToColumn();
+      
+      if (hasReplyToColumn) {
+        // Проверяем, что сообщение существует и принадлежит этому чату
+        const replyMessage = await this.inbox.getMessage(dto.replyTo);
+        if (!replyMessage || replyMessage.conversation_id !== threadId) {
+          throw new BadRequestException('Reply message not found or belongs to different conversation');
+        }
+      } else {
+        // Если колонки нет, игнорируем replyTo
+        console.warn('⚠️ replyTo ignored: reply_to column does not exist in database');
       }
     }
 
