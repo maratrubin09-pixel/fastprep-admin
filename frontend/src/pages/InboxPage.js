@@ -423,11 +423,15 @@ const InboxPage = () => {
 
   // Автопрокрутка при загрузке сообщений или новых сообщениях
   // Всегда прокручиваем к последнему сообщению при:
-  // 1. Загрузке сообщений чата впервые (смена selectedThread)
-  // 2. Новых входящих сообщениях (через WebSocket)
+  // 1. Загрузке сообщений чата впервые (смена selectedThread) - ВСЕГДА
+  // 2. Новых входящих сообщениях (через WebSocket) - ВСЕГДА
   // Для остальных случаев (пользователь прокрутил вверх) - только если он уже внизу
   useEffect(() => {
-    if (!messagesContainerRef.current || messages.length === 0 || !selectedThread) return;
+    if (!messagesContainerRef.current || messages.length === 0 || !selectedThread) {
+      // Сбрасываем состояние кнопки если нет сообщений
+      setShowScrollToBottom(false);
+      return;
+    }
 
     const container = messagesContainerRef.current;
     const scrollHeight = container.scrollHeight;
@@ -451,8 +455,8 @@ const InboxPage = () => {
     prevSelectedThreadIdRef.current = selectedThread.id;
 
     // Всегда прокручиваем если:
-    // 1. Это первая загрузка чата
-    // 2. Новое входящее сообщение
+    // 1. Это первая загрузка чата - ВСЕГДА
+    // 2. Новое входящее сообщение - ВСЕГДА
     // 3. Пользователь уже внизу
     const shouldScroll = isFirstLoad || isNewIncomingMessage || isNearBottom;
 
@@ -471,33 +475,65 @@ const InboxPage = () => {
               if (messagesEndRef.current) {
                 messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
               }
-            }, isFirstLoad ? 50 : 50);
+              // Обновляем состояние кнопки после прокрутки
+              if (messagesContainerRef.current) {
+                const c = messagesContainerRef.current;
+                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                setShowScrollToBottom(dFromBottom >= 100);
+              }
+            }, isFirstLoad ? 100 : 100);
           } else if (messagesEndRef.current) {
             const behavior = isFirstLoad ? 'auto' : 'smooth';
             messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+            // Обновляем состояние кнопки
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                const c = messagesContainerRef.current;
+                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                setShowScrollToBottom(dFromBottom >= 100);
+              }
+            }, 100);
           }
-        }, isFirstLoad ? 150 : 100);
+        }, isFirstLoad ? 200 : 100);
 
         // Вторая попытка для гарантии
         setTimeout(() => {
           if (messagesContainerRef.current) {
             const container = messagesContainerRef.current;
             container.scrollTop = container.scrollHeight;
+            // Обновляем состояние кнопки после прокрутки
+            const dFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            setShowScrollToBottom(dFromBottom >= 100);
           } else if (messagesEndRef.current) {
             const behavior = isFirstLoad ? 'auto' : 'smooth';
             messagesEndRef.current.scrollIntoView({ behavior, block: 'end' });
+            // Обновляем состояние кнопки
+            setTimeout(() => {
+              if (messagesContainerRef.current) {
+                const c = messagesContainerRef.current;
+                const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+                setShowScrollToBottom(dFromBottom >= 100);
+              }
+            }, 100);
           }
-        }, isFirstLoad ? 400 : 300);
+        }, isFirstLoad ? 500 : 300);
       });
+    } else {
+      // Если не прокручиваем, обновляем состояние кнопки
+      setShowScrollToBottom(distanceFromBottom >= 100);
     }
   }, [messages, selectedThread]);
 
   // Проверка, нужно ли показать кнопку "Прокрутить вниз"
   useEffect(() => {
-    if (!messagesContainerRef.current) return;
+    if (!messagesContainerRef.current || !selectedThread || messages.length === 0) {
+      setShowScrollToBottom(false);
+      return;
+    }
 
     const container = messagesContainerRef.current;
     const checkScroll = () => {
+      if (!container) return;
       const scrollHeight = container.scrollHeight;
       const scrollTop = container.scrollTop;
       const clientHeight = container.clientHeight;
@@ -506,14 +542,14 @@ const InboxPage = () => {
       setShowScrollToBottom(!isNearBottom);
     };
 
-    // Проверяем сразу
-    checkScroll();
+    // Проверяем сразу с небольшой задержкой для гарантии готовности DOM
+    setTimeout(checkScroll, 100);
 
     // Добавляем обработчик scroll
     container.addEventListener('scroll', checkScroll);
 
     // Также периодически проверяем (на случай если scroll событие не срабатывает)
-    const intervalId = setInterval(checkScroll, 500);
+    const intervalId = setInterval(checkScroll, 300);
 
     return () => {
       container.removeEventListener('scroll', checkScroll);
@@ -531,9 +567,25 @@ const InboxPage = () => {
         if (messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
         }
+        // Обновляем состояние кнопки после прокрутки
+        setTimeout(() => {
+          if (messagesContainerRef.current) {
+            const c = messagesContainerRef.current;
+            const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+            setShowScrollToBottom(dFromBottom >= 100);
+          }
+        }, 100);
       }, 50);
     } else if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      // Обновляем состояние кнопки
+      setTimeout(() => {
+        if (messagesContainerRef.current) {
+          const c = messagesContainerRef.current;
+          const dFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+          setShowScrollToBottom(dFromBottom >= 100);
+        }
+      }, 100);
     }
   };
 
