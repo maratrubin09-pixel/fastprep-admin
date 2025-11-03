@@ -1610,6 +1610,8 @@ const InboxPage = () => {
                           justifyContent: msg.direction === 'out' ? 'flex-end' : 'flex-start',
                           position: 'relative',
                           mt: isGrouped ? 0.5 : 2,
+                          width: '100%',
+                          maxWidth: '100%',
                           '&:hover .action-button': {
                             opacity: 1,
                           },
@@ -1621,6 +1623,7 @@ const InboxPage = () => {
                             pt: isGrouped && msg.direction === 'in' ? 0.5 : (isGrouped ? 1.5 : 2),
                             maxWidth: '70%',
                             width: 'fit-content',
+                            minWidth: 0,
                             backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
                             color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
                             border: msg.direction === 'in' ? '1px solid #e0e0e0' : '2px solid #BA68C8', // Фиолетовая рамка для исходящих
@@ -1821,6 +1824,8 @@ const InboxPage = () => {
                                   wordWrap: 'break-word',
                                   overflowWrap: 'break-word',
                                   wordBreak: 'break-word',
+                                  maxWidth: '100%',
+                                  overflow: 'hidden',
                                 }}
                               >
                                 <Linkify
