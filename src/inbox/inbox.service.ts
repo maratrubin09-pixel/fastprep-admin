@@ -822,7 +822,7 @@ export class InboxService {
     // Преобразуем результат для удобства frontend
     return result.rows.map(row => {
       // Format reactions from metadata
-      let reactions = [];
+      let reactions: Array<{ emoji: string; count: number; users: string[] }> = [];
       if (row.metadata && row.metadata.reactions && Array.isArray(row.metadata.reactions)) {
         const reactionCounts: { [key: string]: { count: number; users: string[] } } = {};
         row.metadata.reactions.forEach((r: any) => {
