@@ -475,33 +475,27 @@ const InboxPage = () => {
       fetchMessages(selectedThread.id);
       setReplyingTo(null); // Сбрасываем reply при смене чата
       
-      // Load draft for this conversation
+      // Сначала очищаем поле ввода
+      setMessageText('');
+      if (messageInputRef.current) {
+        messageInputRef.current.value = '';
+      }
+      
+      // Затем загружаем черновик для этого чата (если есть)
       const draftKey = `draft_${selectedThread.id}`;
       draftKeyRef.current = draftKey;
       const savedDraft = localStorage.getItem(draftKey);
-      if (savedDraft) {
-        setMessageText(savedDraft);
-        // Use setTimeout to ensure ref is ready
+      if (savedDraft && savedDraft.trim()) {
+        // Небольшая задержка чтобы убедиться что очистка завершена
         setTimeout(() => {
+          setMessageText(savedDraft);
           if (messageInputRef.current) {
             messageInputRef.current.value = savedDraft;
           }
-        }, 100);
-      } else {
-        setMessageText('');
-        if (messageInputRef.current) {
-          messageInputRef.current.value = '';
-        }
+        }, 50);
       }
     }
-    
-    // Save draft when component unmounts or thread changes
-    return () => {
-      if (draftKeyRef.current && messageText) {
-        localStorage.setItem(draftKeyRef.current, messageText);
-      }
-    };
-  }, [selectedThread, messageText]);
+  }, [selectedThread]); // Убираем messageText из зависимостей!
 
   // Автопрокрутка при загрузке сообщений или новых сообщениях
   // При первой загрузке чата - сразу устанавливаем позицию внизу БЕЗ прокрутки
@@ -904,6 +898,10 @@ const InboxPage = () => {
       }
       
       // Очищаем поле ввода, вложение и reply
+      // Сначала очищаем ref напрямую для немедленного эффекта
+      if (messageInputRef.current) {
+        messageInputRef.current.value = '';
+      }
       setMessageText('');
       setAttachedFileKey(null);
       setReplyingTo(null); // Сбрасываем reply
@@ -912,9 +910,6 @@ const InboxPage = () => {
         localStorage.removeItem(draftKeyRef.current);
       }
       setFileUploadResetKey(prev => prev + 1); // Сбрасываем FileUpload компонент
-      if (messageInputRef.current) {
-        messageInputRef.current.value = '';
-      }
       
       // Обновляем список чатов (переместить текущий чат наверх)
       setConversations(prev => {
@@ -1612,8 +1607,8 @@ const InboxPage = () => {
                           sx={{
                             p: isGrouped ? 1.5 : 2,
                             pt: isGrouped && msg.direction === 'in' ? 0.5 : (isGrouped ? 1.5 : 2),
-                            maxWidth: { xs: '85%', sm: '75%', md: '65%', lg: '55%' },
-                            minWidth: 0,
+                            maxWidth: '70%',
+                            width: 'fit-content',
                             backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
                             color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
                             border: msg.direction === 'in' ? '1px solid #e0e0e0' : '2px solid #BA68C8', // Фиолетовая рамка для исходящих
