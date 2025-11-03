@@ -592,19 +592,15 @@ export class InboxService {
         return { conversations: [], messages: [] };
       }
 
-      // For ILIKE, we need to escape special characters properly
-      // Escape % and _ characters for LIKE pattern matching
-      const escapedQuery = query.trim().replace(/[%_\\]/g, (char) => {
-        if (char === '%') return '\\%';
-        if (char === '_') return '\\_';
-        if (char === '\\') return '\\\\';
-        return char;
-      });
+      // Escape special characters for LIKE pattern matching in PostgreSQL
+      // PostgreSQL uses backslash escaping by default
+      const escapedQuery = query.trim().replace(/[%_\\]/g, '\\$&');
       const searchTerm = `%${escapedQuery}%`;
       
       console.log(`🔍 Search query: "${query}", escaped: "${escapedQuery}", searchTerm: "${searchTerm}"`);
 
       // Search conversations by title, sender name, phone, username
+      // Using LOWER() with LIKE for better compatibility
       const conversationsQuery = `
         SELECT DISTINCT c.*
         FROM conversations c
@@ -612,14 +608,14 @@ export class InboxService {
           (c.deleted_at IS NULL OR c.is_deleted = false OR c.is_deleted IS NULL)
           AND (c.is_archived = false OR c.is_archived IS NULL)
           AND (
-            c.chat_title ILIKE $1 OR
-            c.custom_name ILIKE $1 OR
-            c.sender_first_name ILIKE $1 OR
-            c.sender_last_name ILIKE $1 OR
-            COALESCE(c.sender_first_name || ' ' || c.sender_last_name, '') ILIKE $1 OR
-            c.sender_phone ILIKE $1 OR
-            c.sender_username ILIKE $1 OR
-            c.external_chat_id ILIKE $1
+            LOWER(COALESCE(c.chat_title, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.custom_name, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.sender_first_name, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.sender_last_name, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.sender_first_name || ' ' || c.sender_last_name, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.sender_phone, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.sender_username, '')) LIKE LOWER($1) OR
+            LOWER(COALESCE(c.external_chat_id, '')) LIKE LOWER($1)
           )
         )
         ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
@@ -630,16 +626,17 @@ export class InboxService {
       console.log(`🔍 Found ${conversationsResult.rows.length} conversations matching "${query}"`);
 
       // Search messages by text content
-      // Check if text column exists and handle NULL values
+      // Using LOWER() with LIKE for better compatibility
       const messagesQuery = `
         SELECT DISTINCT m.*, c.chat_title, c.custom_name, c.channel_id, c.id as conversation_id_display
         FROM messages m
-        JOIN conversations c ON m.conversation_id = c.id
+        INNER JOIN conversations c ON m.conversation_id = c.id
         WHERE (
           (c.deleted_at IS NULL OR c.is_deleted = false OR c.is_deleted IS NULL)
           AND (c.is_archived = false OR c.is_archived IS NULL)
           AND m.text IS NOT NULL
-          AND m.text ILIKE $1
+          AND LENGTH(TRIM(COALESCE(m.text, ''))) > 0
+          AND LOWER(m.text) LIKE LOWER($1)
         )
         ORDER BY m.created_at DESC
         LIMIT $2
