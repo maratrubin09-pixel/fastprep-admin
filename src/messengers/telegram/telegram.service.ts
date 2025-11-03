@@ -1035,8 +1035,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const inputPeer = await this.resolveEntity(channelId, peerId);
 
       // Send sticker using Telegram API
-      await this.client.sendFile(inputPeer, {
-        sticker: stickerId as any, // Telegram sticker file ID
+      // Telegram sendMessage with file option for stickers
+      await this.client.sendMessage(inputPeer, {
+        file: stickerId as any, // Telegram sticker file ID (can be string file_id or InputDocument)
       });
 
       this.logger.log(`✅ Sticker sent: conversationId=${conversationId}, stickerId=${stickerId}`);

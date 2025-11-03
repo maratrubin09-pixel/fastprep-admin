@@ -632,7 +632,7 @@ export class MessagesController {
 
     // Check if user has admin role (simplified check)
     const ep = await this.authz.getEffectivePermissions(userId);
-    if (!ep.permissions.includes('inbox.profile.manage')) {
+    if (!ep || !ep.permissions.includes('inbox.profile.manage')) {
       throw new BadRequestException('Only admins can update profiles');
     }
 

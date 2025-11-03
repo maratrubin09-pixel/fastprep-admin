@@ -110,7 +110,7 @@ export class NotesService {
       [conversationId, userId]
     );
 
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 }
 
