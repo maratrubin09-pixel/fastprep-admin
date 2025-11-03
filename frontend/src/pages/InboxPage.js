@@ -1793,59 +1793,61 @@ const InboxPage = () => {
                               </IconButton>
                             </Box>
                           ) : (
-                            <Box
-                              component="div"
-                              sx={{
-                                wordWrap: 'break-word',
-                                overflowWrap: 'break-word',
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              <Linkify
-                                options={{
-                                  target: '_blank',
-                                  rel: 'noopener noreferrer',
-                                  className: 'message-link',
+                            <>
+                              <Box
+                                component="div"
+                                sx={{
+                                  wordWrap: 'break-word',
+                                  overflowWrap: 'break-word',
+                                  wordBreak: 'break-word',
                                 }}
                               >
-                              {msg.text}
-                              </Linkify>
-                            </Box>
-                            {/* Link preview - extract URLs and show preview */}
-                            {(() => {
-                              const urlRegex = /(https?:\/\/[^\s]+)/g;
-                              const urls = msg.text?.match(urlRegex) || [];
-                              return urls.length > 0 ? (
-                                <Box sx={{ mt: 1 }}>
-                                  {urls.slice(0, 1).map((url, idx) => (
-                                    <Box 
-                                      key={idx}
-                                      sx={{
-                                        mt: 1,
-                                        p: 1,
-                                        border: '1px solid #e0e0e0',
-                                        borderRadius: '8px',
-                                        backgroundColor: '#f5f5f5',
-                                      }}
-                                    >
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                        🔗 {new URL(url).hostname}
-                                      </Typography>
-                                      <Typography 
-                                        variant="caption" 
-                                        component="a" 
-                                        href={url} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                                <Linkify
+                                  options={{
+                                    target: '_blank',
+                                    rel: 'noopener noreferrer',
+                                    className: 'message-link',
+                                  }}
+                                >
+                                {msg.text}
+                                </Linkify>
+                              </Box>
+                              {/* Link preview - extract URLs and show preview */}
+                              {(() => {
+                                const urlRegex = /(https?:\/\/[^\s]+)/g;
+                                const urls = msg.text?.match(urlRegex) || [];
+                                return urls.length > 0 ? (
+                                  <Box sx={{ mt: 1 }}>
+                                    {urls.slice(0, 1).map((url, idx) => (
+                                      <Box 
+                                        key={idx}
+                                        sx={{
+                                          mt: 1,
+                                          p: 1,
+                                          border: '1px solid #e0e0e0',
+                                          borderRadius: '8px',
+                                          backgroundColor: '#f5f5f5',
+                                        }}
                                       >
-                                        {url}
-                                      </Typography>
-                                    </Box>
-                                  ))}
-                                </Box>
-                              ) : null;
-                            })()}
+                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                          🔗 {new URL(url).hostname}
+                                        </Typography>
+                                        <Typography 
+                                          variant="caption" 
+                                          component="a" 
+                                          href={url} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                                        >
+                                          {url}
+                                        </Typography>
+                                      </Box>
+                                    ))}
+                                  </Box>
+                                ) : null;
+                              })()}
+                            </>
                           )}
                           <Box
                             sx={{
