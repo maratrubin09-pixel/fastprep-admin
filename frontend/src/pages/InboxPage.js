@@ -38,6 +38,8 @@ import {
   Close as CloseIcon,
   Search as SearchIcon,
   Clear as ClearIcon,
+  InsertEmoticon as EmoticonIcon,
+  ContentCopy as TemplateIcon,
 } from '@mui/icons-material';
 import { useMediaQuery as useMuiMediaQuery } from '@mui/material';
 import { io } from 'socket.io-client';
@@ -230,6 +232,7 @@ const InboxPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [messageText, setMessageText] = useState('');
+  const draftKeyRef = useRef(null); // Key for localStorage draft
   const [sending, setSending] = useState(false);
   const [attachedFileKey, setAttachedFileKey] = useState(null);
   const [fileUploadResetKey, setFileUploadResetKey] = useState(0);
@@ -245,10 +248,14 @@ const InboxPage = () => {
   const [editedName, setEditedName] = useState('');
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null); // Сообщение на которое отвечаем { id, text, sender_name }
+  const [editingMessageId, setEditingMessageId] = useState(null); // ID сообщения которое редактируем
+  const [editingMessageText, setEditingMessageText] = useState(''); // Текст редактируемого сообщения
   const [searchQuery, setSearchQuery] = useState(''); // Поисковый запрос
   const [searchResults, setSearchResults] = useState({ conversations: [], messages: [] }); // Результаты поиска
   const [isSearching, setIsSearching] = useState(false); // Флаг активного поиска
   const searchTimeoutRef = useRef(null); // Ref для debounce поиска
+  const [typingUsers, setTypingUsers] = useState([]); // Пользователи которые печатают
+  const typingTimeoutRef = useRef(null); // Timeout для отправки typing события
   
   // Responsive design
   const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
@@ -297,6 +304,21 @@ const InboxPage = () => {
       });
 
       // Handle incoming messages
+      // Listen for typing events
+      socket.on('typing', (data) => {
+        if (data.conversation_id === selectedThreadRef.current?.id && data.user_id !== user.id) {
+          setTypingUsers(prev => {
+            const filtered = prev.filter(u => u.user_id !== data.user_id);
+            return [...filtered, { user_id: data.user_id, user_name: data.user_name || 'Someone' }];
+          });
+          
+          // Clear typing indicator after 3 seconds
+          setTimeout(() => {
+            setTypingUsers(prev => prev.filter(u => u.user_id !== data.user_id));
+          }, 3000);
+        }
+      });
+
       socket.on('new_message', (data) => {
         console.log('📨 New message received via WebSocket:', data);
         
@@ -312,7 +334,7 @@ const InboxPage = () => {
           // Браузерное уведомление (нужны разрешения)
           if ('Notification' in window && Notification.permission === 'granted') {
             // Используем setConversations callback для получения актуальных данных
-            setConversations(prev => {
+        setConversations(prev => {
               const conv = prev.find(c => c.id === data.conversationId);
               const convTitle = conv?.chat_title || data.message.sender_name || 'New message';
               new Notification(convTitle, {
@@ -424,13 +446,51 @@ const InboxPage = () => {
     selectedThreadRef.current = selectedThread;
   }, [selectedThread]);
 
+  // Load templates on mount
+  useEffect(() => {
+    const savedTemplates = localStorage.getItem('message_templates');
+    if (savedTemplates) {
+      try {
+        setTemplates(JSON.parse(savedTemplates));
+      } catch (e) {
+        console.error('Failed to parse templates:', e);
+      }
+    }
+  }, []);
+
   // Fetch messages when thread is selected
   useEffect(() => {
     if (selectedThread) {
       fetchMessages(selectedThread.id);
       setReplyingTo(null); // Сбрасываем reply при смене чата
+      
+      // Load draft for this conversation
+      const draftKey = `draft_${selectedThread.id}`;
+      draftKeyRef.current = draftKey;
+      const savedDraft = localStorage.getItem(draftKey);
+      if (savedDraft) {
+        setMessageText(savedDraft);
+        // Use setTimeout to ensure ref is ready
+        setTimeout(() => {
+          if (messageInputRef.current) {
+            messageInputRef.current.value = savedDraft;
+          }
+        }, 100);
+      } else {
+        setMessageText('');
+        if (messageInputRef.current) {
+          messageInputRef.current.value = '';
+        }
+      }
     }
-  }, [selectedThread]);
+    
+    // Save draft when component unmounts or thread changes
+    return () => {
+      if (draftKeyRef.current && messageText) {
+        localStorage.setItem(draftKeyRef.current, messageText);
+      }
+    };
+  }, [selectedThread, messageText]);
 
   // Автопрокрутка при загрузке сообщений или новых сообщениях
   // При первой загрузке чата - сразу устанавливаем позицию внизу БЕЗ прокрутки
@@ -836,6 +896,10 @@ const InboxPage = () => {
       setMessageText('');
       setAttachedFileKey(null);
       setReplyingTo(null); // Сбрасываем reply
+      // Clear draft
+      if (draftKeyRef.current) {
+        localStorage.removeItem(draftKeyRef.current);
+      }
       setFileUploadResetKey(prev => prev + 1); // Сбрасываем FileUpload компонент
       if (messageInputRef.current) {
         messageInputRef.current.value = '';
@@ -878,16 +942,51 @@ const InboxPage = () => {
     return channelId.split(':')[0] || 'unknown';
   };
 
-  const formatTime = (timestamp) => {
+  const formatTime = (timestamp, showTime = false) => {
     if (!timestamp) return '';
     const date = new Date(timestamp);
     const now = new Date();
     const diff = now - date;
+    const diffMinutes = Math.floor(diff / 60000);
+    const diffHours = Math.floor(diff / 3600000);
+    const diffDays = Math.floor(diff / 86400000);
     
-    if (diff < 60000) return 'Just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return date.toLocaleDateString();
+    // Today - show time
+    if (diffDays === 0) {
+      if (diffMinutes < 1) return 'Just now';
+      if (diffMinutes < 60) return `${diffMinutes}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (showTime) {
+        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+      return 'Today';
+    }
+    
+    // Yesterday
+    if (diffDays === 1) {
+      if (showTime) {
+        return `Yesterday ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+      }
+      return 'Yesterday';
+    }
+    
+    // Within this week
+    if (diffDays < 7) {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = days[date.getDay()];
+      if (showTime) {
+        return `${dayName} ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+      }
+      return dayName;
+    }
+    
+    // Older than a week - show date
+    if (diffDays < 365) {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    
+    // Older than a year
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
   const handleEditName = () => {
@@ -940,6 +1039,43 @@ const InboxPage = () => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    }
+  };
+
+  const handleSaveEdit = async (messageId) => {
+    if (!editingMessageText.trim()) {
+      alert('Message cannot be empty');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/inbox/messages/${messageId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: editingMessageText.trim() }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to edit message');
+      }
+
+      const updatedMessage = await response.json();
+      
+      // Update message in local state
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, text: updatedMessage.text, edited_at: updatedMessage.edited_at, updated_at: updatedMessage.updated_at } : m
+      ));
+
+      setEditingMessageId(null);
+      setEditingMessageText('');
+    } catch (err) {
+      console.error('Failed to edit message:', err);
+      alert('Failed to edit message: ' + err.message);
     }
   };
 
@@ -1113,7 +1249,7 @@ const InboxPage = () => {
                 <CircularProgress size={16} />
                 <Typography variant="caption" color="text.secondary">
                   Searching...
-                </Typography>
+            </Typography>
               </Box>
             )}
             {searchQuery && !isSearching && (
@@ -1142,7 +1278,7 @@ const InboxPage = () => {
                         color: '#6A1B9A', // Фиолетовый текст
                         '&:hover': {
                           backgroundColor: '#E8EAF6',
-                        },
+                      },
                       },
                       backgroundColor: conv.unread_count > 0 ? 'action.hover' : 'transparent',
                       fontWeight: conv.unread_count > 0 ? 'bold' : 'normal',
@@ -1331,7 +1467,7 @@ const InboxPage = () => {
                         onClick={handleEditName}
                       >
                         {selectedThread.custom_name || selectedThread.chat_title || selectedThread.external_chat_id || 'Unknown'}
-                      </Typography>
+                    </Typography>
                     )}
                     <Typography variant="caption" color="text.secondary">
                       {selectedThread.channel_id}
@@ -1413,22 +1549,58 @@ const InboxPage = () => {
                     No messages yet
                   </Typography>
                 ) : (
-                  <Stack spacing={2}>
-                    {messages.map((msg) => (
+                  <Stack spacing={0.5}>
+                    {messages
+                      .filter(msg => {
+                        // Filter by media type if media filter is active
+                        if (!selectedThread.mediaFilter || selectedThread.mediaFilter === 'all') {
+                          return true;
+                        }
+                        const hasMedia = msg.object_key || msg.objectKey || msg.metadata?.attachments?.length > 0;
+                        if (!hasMedia) return false;
+                        
+                        if (selectedThread.mediaFilter === 'photos') {
+                          return msg.metadata?.attachments?.some(a => a.type === 'photo') || 
+                                 msg.object_key?.includes('photo') || 
+                                 msg.objectKey?.includes('photo');
+                        }
+                        if (selectedThread.mediaFilter === 'videos') {
+                          return msg.metadata?.attachments?.some(a => a.type === 'video') || 
+                                 msg.object_key?.includes('video') || 
+                                 msg.objectKey?.includes('video');
+                        }
+                        if (selectedThread.mediaFilter === 'files') {
+                          return msg.metadata?.attachments?.some(a => ['document', 'audio', 'voice'].includes(a.type)) ||
+                                 msg.object_key || msg.objectKey;
+                        }
+                        return true;
+                      })
+                      .map((msg, index) => {
+                        // Check if this message should be grouped with the previous one
+                        const prevMsg = index > 0 ? messages[index - 1] : null;
+                        const isGrouped = prevMsg && 
+                          prevMsg.direction === msg.direction && 
+                          prevMsg.sender_name === msg.sender_name &&
+                          prevMsg.sender_id === msg.sender_id &&
+                          new Date(msg.created_at) - new Date(prevMsg.created_at) < 300000; // 5 minutes
+                        
+                        return (
                       <Box
                         key={msg.id}
                         sx={{
                           display: 'flex',
                           justifyContent: msg.direction === 'out' ? 'flex-end' : 'flex-start',
                           position: 'relative',
-                          '&:hover .reply-button': {
+                          mt: isGrouped ? 0.5 : 2,
+                          '&:hover .action-button': {
                             opacity: 1,
                           },
                         }}
                       >
                         <Paper
                           sx={{
-                            p: 2,
+                            p: isGrouped ? 1.5 : 2,
+                            pt: isGrouped && msg.direction === 'in' ? 0.5 : (isGrouped ? 1.5 : 2),
                             maxWidth: '70%',
                             backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
                             color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
@@ -1437,6 +1609,7 @@ const InboxPage = () => {
                             wordWrap: 'break-word',
                             overflowWrap: 'break-word',
                             position: 'relative',
+                            borderRadius: isGrouped ? '12px' : '16px', // Меньше скругление для сгруппированных
                             '& .message-link': {
                               wordBreak: 'break-all',
                               overflowWrap: 'anywhere',
@@ -1454,7 +1627,7 @@ const InboxPage = () => {
                             },
                           }}
                         >
-                          {msg.sender_name && msg.direction === 'in' && (
+                          {msg.sender_name && msg.direction === 'in' && !isGrouped && (
                             <Typography variant="caption" fontWeight="bold" display="block" sx={{ mb: 0.5 }}>
                               {msg.sender_name}
                             </Typography>
@@ -1507,10 +1680,20 @@ const InboxPage = () => {
                                     <Typography variant="caption" display="block">🎥 Video</Typography>
                                   )}
                                   {att.type === 'voice' && (
-                                    <Typography variant="caption" display="block">🎤 Voice message</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <audio controls style={{ maxWidth: '100%' }}>
+                                        <source src={att.url || att.objectKey || ''} />
+                                      </audio>
+                                      <Typography variant="caption" display="block">🎤 Voice message</Typography>
+                                    </Box>
                                   )}
                                   {att.type === 'audio' && (
-                                    <Typography variant="caption" display="block">🎵 Audio: {att.fileName || 'audio'}</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <audio controls style={{ maxWidth: '100%' }}>
+                                        <source src={att.url || att.objectKey || ''} />
+                                      </audio>
+                                      <Typography variant="caption" display="block">🎵 {att.fileName || 'Audio'}</Typography>
+                                    </Box>
                                   )}
                                   {att.type === 'document' && (
                                     <Typography variant="caption" display="block">📎 {att.fileName || 'Document'}</Typography>
@@ -1527,25 +1710,143 @@ const InboxPage = () => {
                               ))}
                             </Box>
                           )}
-                          <Typography 
-                            variant="body1" 
-                            component="div"
+                          {/* Message reactions */}
+                          {(msg.reactions || []).length > 0 && (
+                            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                              {msg.reactions.map((reaction, idx) => (
+                                <Chip
+                                  key={idx}
+                                  label={`${reaction.emoji} ${reaction.count || 1}`}
+                                  size="small"
+                                  sx={{ height: 24, fontSize: '0.75rem' }}
+                                  onClick={() => {
+                                    // Toggle reaction
+                                    const currentReactions = msg.reactions || [];
+                                    const existing = currentReactions.find(r => r.emoji === reaction.emoji);
+                                    // This would need backend API to persist
+                                    console.log('Toggle reaction:', reaction.emoji);
+                                  }}
+                                />
+                              ))}
+                            </Box>
+                          )}
+                          {/* Add reaction button - appears on hover */}
+                          <IconButton
+                            size="small"
                             sx={{
-                              wordWrap: 'break-word',
-                              overflowWrap: 'break-word',
-                              wordBreak: 'break-word',
+                              position: 'absolute',
+                              bottom: 4,
+                              right: 4,
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              '&:hover': { opacity: 1 },
                             }}
+                            onClick={() => {
+                              const emoji = prompt('Choose emoji reaction:');
+                              if (emoji) {
+                                // This would need backend API
+                                console.log('Add reaction:', emoji, 'to message:', msg.id);
+                              }
+                            }}
+                            title="Add reaction"
                           >
-                            <Linkify
-                              options={{
-                                target: '_blank',
-                                rel: 'noopener noreferrer',
-                                className: 'message-link',
+                            <EmoticonIcon fontSize="small" />
+                          </IconButton>
+                          {/* Режим редактирования или обычное отображение */}
+                          {editingMessageId === msg.id ? (
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mt: 1 }}>
+                              <TextField
+                                fullWidth
+                                multiline
+                                value={editingMessageText}
+                                onChange={(e) => setEditingMessageText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSaveEdit(msg.id);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingMessageId(null);
+                                    setEditingMessageText('');
+                                  }
+                                }}
+                                autoFocus
+                                size="small"
+                                sx={{ flex: 1 }}
+                              />
+                              <IconButton
+                                size="small"
+                                onClick={() => handleSaveEdit(msg.id)}
+                                color="primary"
+                                title="Save"
+                              >
+                                <SaveIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setEditingMessageId(null);
+                                  setEditingMessageText('');
+                                }}
+                                title="Cancel"
+                              >
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          ) : (
+                            <Box
+                              component="div"
+                              sx={{
+                                wordWrap: 'break-word',
+                                overflowWrap: 'break-word',
+                                wordBreak: 'break-word',
                               }}
                             >
+                              <Linkify
+                                options={{
+                                  target: '_blank',
+                                  rel: 'noopener noreferrer',
+                                  className: 'message-link',
+                                }}
+                              >
                               {msg.text}
-                            </Linkify>
-                          </Typography>
+                              </Linkify>
+                            </Box>
+                            {/* Link preview - extract URLs and show preview */}
+                            {(() => {
+                              const urlRegex = /(https?:\/\/[^\s]+)/g;
+                              const urls = msg.text?.match(urlRegex) || [];
+                              return urls.length > 0 ? (
+                                <Box sx={{ mt: 1 }}>
+                                  {urls.slice(0, 1).map((url, idx) => (
+                                    <Box 
+                                      key={idx}
+                                      sx={{
+                                        mt: 1,
+                                        p: 1,
+                                        border: '1px solid #e0e0e0',
+                                        borderRadius: '8px',
+                                        backgroundColor: '#f5f5f5',
+                                      }}
+                                    >
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                        🔗 {new URL(url).hostname}
+                                      </Typography>
+                                      <Typography 
+                                        variant="caption" 
+                                        component="a" 
+                                        href={url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                                      >
+                                        {url}
+                                      </Typography>
+                                    </Box>
+                                  ))}
+                                </Box>
+                              ) : null;
+                            })()}
+                          )}
                           <Box
                             sx={{
                               display: 'flex',
@@ -1560,59 +1861,114 @@ const InboxPage = () => {
                                 opacity: 0.7,
                               }}
                             >
-                              {formatTime(msg.created_at)}
+                              {formatTime(msg.created_at, true)}
+                              {msg.edited_at && ' (edited)'}
                             </Typography>
                             {msg.direction === 'out' && (
                               <>
                                 {msg.delivery_status === 'queued' && (
-                                  <DoneIcon sx={{ fontSize: 14, opacity: 0.5, color: 'grey.400' }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <DoneIcon sx={{ fontSize: 14, opacity: 0.5, color: 'grey.400' }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Queued</Typography>
+                                  </Box>
                                 )}
                                 {msg.delivery_status === 'sending' && (
-                                  <CircularProgress size={14} sx={{ opacity: 0.7 }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <CircularProgress size={14} sx={{ opacity: 0.7 }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Sending...</Typography>
+                                  </Box>
                                 )}
                                 {msg.delivery_status === 'sent' && (
-                                  <DoneAllIcon sx={{ fontSize: 14, opacity: 0.7, color: 'primary.light' }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <DoneAllIcon sx={{ fontSize: 14, opacity: 0.7, color: 'primary.light' }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Sent</Typography>
+                                  </Box>
                                 )}
                                 {msg.delivery_status === 'delivered' && (
-                                  <DoneAllIcon sx={{ fontSize: 14, opacity: 1, color: 'primary.main' }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <DoneAllIcon sx={{ fontSize: 14, opacity: 1, color: 'primary.main' }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Delivered</Typography>
+                                  </Box>
+                                )}
+                                {msg.delivery_status === 'read' && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <DoneAllIcon sx={{ fontSize: 14, opacity: 1, color: 'info.main' }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Read</Typography>
+                                  </Box>
                                 )}
                                 {msg.delivery_status === 'failed' && (
-                                  <DoneIcon sx={{ fontSize: 14, opacity: 1, color: 'error.main' }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <DoneIcon sx={{ fontSize: 14, opacity: 1, color: 'error.main' }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem', color: 'error.main' }}>Failed</Typography>
+                                  </Box>
+                                )}
+                                {msg.delivery_status === 'pending' && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <CircularProgress size={14} sx={{ opacity: 0.5 }} />
+                                    <Typography variant="caption" sx={{ opacity: 0.7, fontSize: '0.65rem' }}>Pending</Typography>
+                                  </Box>
                                 )}
                               </>
                             )}
                           </Box>
-                          {/* Кнопка Reply - появляется при hover */}
-                          <IconButton
-                            className="reply-button"
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setReplyingTo({ 
-                                id: msg.id, 
-                                text: msg.text, 
-                                sender_name: msg.sender_name || (msg.direction === 'out' ? 'You' : 'Unknown') 
-                              });
-                            }}
-                            sx={{ 
-                              position: 'absolute',
-                              top: 8,
-                              right: 8,
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
+                          {/* Кнопки действий - появляются при hover */}
+                          <Box sx={{ 
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            display: 'flex',
+                            gap: 0.5,
+                            opacity: 0,
+                            transition: 'opacity 0.2s',
+                            '&:hover': { opacity: 1 },
+                            '& .action-button': {
                               backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                              '&:hover': { 
-                                opacity: 1,
-                                backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                              }
-                            }}
-                            title="Reply"
-                          >
-                            <ReplyIcon fontSize="small" />
-                          </IconButton>
+                              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.95)' }
+                            }
+                          }}>
+                            {msg.direction === 'out' && (
+                              <IconButton
+                                className="action-button edit-button"
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingMessageId(msg.id);
+                                  setEditingMessageText(msg.text || '');
+                                }}
+                                title="Edit"
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            )}
+                            <IconButton
+                              className="action-button reply-button"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReplyingTo({ 
+                                  id: msg.id, 
+                                  text: msg.text, 
+                                  sender_name: msg.sender_name || (msg.direction === 'out' ? 'You' : 'Unknown') 
+                                });
+                              }}
+                              title="Reply"
+                            >
+                              <ReplyIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
                         </Paper>
                       </Box>
-                    ))}
+                      );
+                    })}
+                    {/* Typing indicator */}
+                    {typingUsers.length > 0 && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
+                        <CircularProgress size={16} />
+                        <Typography variant="caption" color="text.secondary">
+                          {typingUsers.map(u => u.user_name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                        </Typography>
+                      </Box>
+                    )}
                     {/* Ref для автопрокрутки */}
                     <div ref={messagesEndRef} />
                   </Stack>
@@ -1663,7 +2019,7 @@ const InboxPage = () => {
                     </IconButton>
                   </Box>
                 )}
-                <Box display="flex" gap={1} alignItems="flex-end">
+                <Box display="flex" gap={1} alignItems="flex-end" position="relative">
                   <FileUpload
                     threadId={selectedThread.id}
                     resetKey={fileUploadResetKey}
@@ -1677,12 +2033,164 @@ const InboxPage = () => {
                     }}
                     disabled={sending}
                   />
+                  <IconButton
+                    onClick={() => setShowTemplates(!showTemplates)}
+                    title="Message templates"
+                    sx={{ alignSelf: 'flex-end' }}
+                  >
+                    <TemplateIcon />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    title="Add emoji"
+                    sx={{ alignSelf: 'flex-end' }}
+                  >
+                    <EmoticonIcon />
+                  </IconButton>
+                  {/* Emoji picker */}
+                  {showEmojiPicker && (
+                    <Paper
+                      sx={{
+                        position: 'absolute',
+                        bottom: '100%',
+                        right: 0,
+                        mb: 1,
+                        p: 1,
+                        maxHeight: 200,
+                        overflow: 'auto',
+                        zIndex: 1000,
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(8, 1fr)',
+                        gap: 0.5,
+                        width: 300,
+                      }}
+                    >
+                      {['😀', '😂', '😍', '🤔', '👍', '❤️', '🔥', '✨', '😊', '😢', '😮', '😡', '🎉', '💪', '👏', '🙏', '👍', '👎', '❤️', '💯', '✅', '❌', '⚠️', 'ℹ️'].map((emoji) => (
+                        <IconButton
+                          key={emoji}
+                          size="small"
+                          onClick={() => {
+                            const currentText = messageInputRef.current?.value || messageText;
+                            const newText = currentText + emoji;
+                            setMessageText(newText);
+                            if (messageInputRef.current) {
+                              messageInputRef.current.value = newText;
+                            }
+                            setShowEmojiPicker(false);
+                          }}
+                          sx={{ fontSize: '1.5rem' }}
+                        >
+                          {emoji}
+                        </IconButton>
+                      ))}
+                    </Paper>
+                  )}
+                  {/* Templates menu */}
+                  {showTemplates && (
+                    <Paper
+                      sx={{
+                        position: 'absolute',
+                        bottom: '100%',
+                        right: 0,
+                        mb: 1,
+                        p: 1,
+                        maxHeight: 200,
+                        overflow: 'auto',
+                        zIndex: 1000,
+                        minWidth: 250,
+                      }}
+                    >
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>Templates</Typography>
+                      {templates.length === 0 ? (
+                        <Typography variant="caption" color="text.secondary">
+                          No templates yet
+                        </Typography>
+                      ) : (
+                        templates.map((template, idx) => (
+                          <Box
+                            key={idx}
+                            sx={{
+                              p: 1,
+                              mb: 0.5,
+                              cursor: 'pointer',
+                              '&:hover': { backgroundColor: 'action.hover' },
+                              borderRadius: 1,
+                            }}
+                            onClick={() => {
+                              setMessageText(template.text);
+                              if (messageInputRef.current) {
+                                messageInputRef.current.value = template.text;
+                              }
+                              setShowTemplates(false);
+                            }}
+                          >
+                            <Typography variant="body2">{template.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {template.text.substring(0, 50)}...
+                            </Typography>
+                          </Box>
+                        ))
+                      )}
+                      <Button
+                        size="small"
+                        fullWidth
+                        sx={{ mt: 1 }}
+                        onClick={() => {
+                          const name = prompt('Template name:');
+                          const text = prompt('Template text:');
+                          if (name && text) {
+                            const newTemplates = [...templates, { name, text }];
+                            setTemplates(newTemplates);
+                            localStorage.setItem('message_templates', JSON.stringify(newTemplates));
+                          }
+                          setShowTemplates(false);
+                        }}
+                      >
+                        + New Template
+                      </Button>
+                    </Paper>
+                  )}
                   <TextField
                     inputRef={messageInputRef}
                     fullWidth
                     placeholder="Type a message..."
                     value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
+                    onChange={(e) => {
+                      const newText = e.target.value;
+                      setMessageText(newText);
+                      // Auto-save draft
+                      if (draftKeyRef.current) {
+                        if (newText.trim()) {
+                          localStorage.setItem(draftKeyRef.current, newText);
+                        } else {
+                          localStorage.removeItem(draftKeyRef.current);
+                        }
+                      }
+                      // Send typing indicator
+                      if (selectedThread && socketRef.current && user) {
+                        // Clear previous timeout
+                        if (typingTimeoutRef.current) {
+                          clearTimeout(typingTimeoutRef.current);
+                        }
+                        
+                        // Send typing event
+                        socketRef.current.emit('typing', {
+                          conversation_id: selectedThread.id,
+                          user_id: user.id,
+                          user_name: user.name || 'You'
+                        });
+                        
+                        // Set timeout to stop typing after 2 seconds of inactivity
+                        typingTimeoutRef.current = setTimeout(() => {
+                          if (socketRef.current && selectedThread) {
+                            socketRef.current.emit('typing_stop', {
+                              conversation_id: selectedThread.id,
+                              user_id: user.id
+                            });
+                          }
+                        }, 2000);
+                      }
+                    }}
                     onKeyDown={handleKeyDown}
                     multiline
                     maxRows={4}

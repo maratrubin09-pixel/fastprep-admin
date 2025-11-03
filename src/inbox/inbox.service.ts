@@ -523,6 +523,104 @@ export class InboxService {
   }
 
   /**
+   * Edit an outgoing message
+   * Only allows editing of messages sent by the user
+   */
+  async editMessage(messageId: string, userId: string, newText: string): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get the message
+      const msgResult = await client.query(
+        `SELECT * FROM messages WHERE id = $1`,
+        [messageId]
+      );
+
+      if (msgResult.rows.length === 0) {
+        throw new Error('Message not found');
+      }
+
+      const message = msgResult.rows[0];
+
+      // Check if message is outgoing and belongs to the user
+      if (message.direction !== 'out') {
+        throw new Error('Only outgoing messages can be edited');
+      }
+
+      if (message.sender_id !== userId) {
+        throw new Error('You can only edit your own messages');
+      }
+
+      // Check if edited_at column exists
+      const hasEditedAtColumn = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'edited_at'
+      `);
+
+      // Update message text
+      let updateQuery;
+      if (hasEditedAtColumn.rows.length > 0) {
+        updateQuery = `UPDATE messages 
+                       SET text = $1, updated_at = NOW(), edited_at = NOW()
+                       WHERE id = $2
+                       RETURNING *`;
+      } else {
+        updateQuery = `UPDATE messages 
+                       SET text = $1, updated_at = NOW()
+                       WHERE id = $2
+                       RETURNING *`;
+      }
+
+      const updateResult = await client.query(updateQuery, [newText, messageId]);
+
+      const updatedMessage = updateResult.rows[0];
+
+      // Check if message was already sent (has external_message_id)
+      if (message.external_message_id && message.conversation_id) {
+        // Get conversation to find platform
+        const convResult = await client.query(
+          `SELECT channel_id, telegram_peer_id FROM conversations WHERE id = $1`,
+          [message.conversation_id]
+        );
+
+        if (convResult.rows.length > 0) {
+          const conv = convResult.rows[0];
+          const platform = conv.channel_id?.split(':')[0];
+
+          // If Telegram, update message via API
+          if (platform === 'telegram') {
+            // Update will be handled by worker or we can emit an event
+            // For now, we'll add it to outbox with a special status
+            await client.query(
+              `INSERT INTO outbox (message_id, conversation_id, status, scheduled_at, attempts, created_at)
+               VALUES ($1, $2, 'edit_pending', NOW(), 0, NOW())
+               ON CONFLICT (message_id) DO UPDATE SET status = 'edit_pending', updated_at = NOW()`,
+              [messageId, message.conversation_id]
+            );
+          }
+        }
+      }
+
+      // Audit log
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, created_at)
+         VALUES ($1, 'message.edit', 'message', $2, $3, NOW())`,
+        [userId, messageId, JSON.stringify({ old_text: message.text?.substring(0, 50), new_text: newText.substring(0, 50) })]
+      );
+
+      await client.query('COMMIT');
+      return updatedMessage;
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get message with reply_to_message joined (for display)
    */
   async getMessageWithReply(messageId: string): Promise<any> {

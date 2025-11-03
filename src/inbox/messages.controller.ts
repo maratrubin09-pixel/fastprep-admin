@@ -334,6 +334,27 @@ export class MessagesController {
     
     return await this.inbox.deleteConversation(threadId);
   }
+
+  /**
+   * PUT /api/inbox/messages/:id
+   * Edit a message (only for outgoing messages)
+   */
+  @Put('messages/:id')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.send_message')
+  async editMessage(@Param('id') messageId: string, @Body() body: { text: string }, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    if (!body.text || body.text.trim().length === 0) {
+      throw new BadRequestException('Message text cannot be empty');
+    }
+
+    const updatedMessage = await this.inbox.editMessage(messageId, userId, body.text.trim());
+    return updatedMessage;
+  }
 }
 
 

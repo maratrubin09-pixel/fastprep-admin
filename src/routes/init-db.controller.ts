@@ -102,6 +102,9 @@ export class InitDbController {
       await this.pool.query(`
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES messages(id) ON DELETE SET NULL;
       `);
+      await this.pool.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+      `);
 
       // Добавить оптимизированные индексы
       await this.pool.query(`
