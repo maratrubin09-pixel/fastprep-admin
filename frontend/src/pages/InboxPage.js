@@ -256,6 +256,9 @@ const InboxPage = () => {
   const searchTimeoutRef = useRef(null); // Ref для debounce поиска
   const [typingUsers, setTypingUsers] = useState([]); // Пользователи которые печатают
   const typingTimeoutRef = useRef(null); // Timeout для отправки typing события
+  const [templates, setTemplates] = useState([]); // Шаблоны сообщений
+  const [showTemplates, setShowTemplates] = useState(false); // Показать/скрыть шаблоны
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false); // Показать/скрыть emoji picker
   
   // Responsive design
   const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
@@ -306,7 +309,15 @@ const InboxPage = () => {
       // Handle incoming messages
       // Listen for typing events
       socket.on('typing', (data) => {
-        if (data.conversation_id === selectedThreadRef.current?.id && data.user_id !== user.id) {
+        const token = localStorage.getItem('token');
+        let currentUserId = null;
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            currentUserId = payload.sub || payload.id;
+          } catch (e) {}
+        }
+        if (data.conversation_id === selectedThreadRef.current?.id && data.user_id !== currentUserId) {
           setTypingUsers(prev => {
             const filtered = prev.filter(u => u.user_id !== data.user_id);
             return [...filtered, { user_id: data.user_id, user_name: data.user_name || 'Someone' }];
@@ -2169,28 +2180,39 @@ const InboxPage = () => {
                         }
                       }
                       // Send typing indicator
-                      if (selectedThread && socketRef.current && user) {
-                        // Clear previous timeout
-                        if (typingTimeoutRef.current) {
-                          clearTimeout(typingTimeoutRef.current);
-                        }
-                        
-                        // Send typing event
-                        socketRef.current.emit('typing', {
-                          conversation_id: selectedThread.id,
-                          user_id: user.id,
-                          user_name: user.name || 'You'
-                        });
-                        
-                        // Set timeout to stop typing after 2 seconds of inactivity
-                        typingTimeoutRef.current = setTimeout(() => {
-                          if (socketRef.current && selectedThread) {
-                            socketRef.current.emit('typing_stop', {
+                      if (selectedThread && socketRef.current) {
+                        const token = localStorage.getItem('token');
+                        if (token) {
+                          try {
+                            const payload = JSON.parse(atob(token.split('.')[1]));
+                            const currentUserId = payload.sub || payload.id;
+                            const userName = payload.name || payload.username || 'You';
+                            
+                            // Clear previous timeout
+                            if (typingTimeoutRef.current) {
+                              clearTimeout(typingTimeoutRef.current);
+                            }
+                            
+                            // Send typing event
+                            socketRef.current.emit('typing', {
                               conversation_id: selectedThread.id,
-                              user_id: user.id
+                              user_id: currentUserId,
+                              user_name: userName
                             });
+                            
+                            // Set timeout to stop typing after 2 seconds of inactivity
+                            typingTimeoutRef.current = setTimeout(() => {
+                              if (socketRef.current && selectedThread) {
+                                socketRef.current.emit('typing_stop', {
+                                  conversation_id: selectedThread.id,
+                                  user_id: currentUserId
+                                });
+                              }
+                            }, 2000);
+                          } catch (e) {
+                            console.error('Failed to decode token for typing:', e);
                           }
-                        }, 2000);
+                        }
                       }
                     }}
                     onKeyDown={handleKeyDown}
