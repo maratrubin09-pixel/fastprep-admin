@@ -355,6 +355,27 @@ export class MessagesController {
     const updatedMessage = await this.inbox.editMessage(messageId, userId, body.text.trim());
     return updatedMessage;
   }
+
+  /**
+   * POST /api/inbox/messages/:id/reactions
+   * Add or toggle a reaction to a message
+   */
+  @Post('messages/:id/reactions')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async addReaction(@Param('id') messageId: string, @Body() body: { emoji: string }, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    if (!body.emoji || body.emoji.trim().length === 0 || body.emoji.length > 10) {
+      throw new BadRequestException('Invalid emoji');
+    }
+
+    const updatedMessage = await this.inbox.toggleReaction(messageId, userId, body.emoji.trim());
+    return updatedMessage;
+  }
 }
 
 

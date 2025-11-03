@@ -788,6 +788,7 @@ export class InboxService {
   }
 
   async getMessages(conversationId: string): Promise<any[]> {
+    // Format reactions from metadata for frontend
     // Сначала проверяем, существует ли колонка reply_to
     const hasReplyToColumn = await this.hasReplyToColumn();
 
@@ -819,16 +820,39 @@ export class InboxService {
     }
 
     // Преобразуем результат для удобства frontend
-    return result.rows.map(row => ({
-      ...row,
-      reply_to_message: hasReplyToColumn && row.reply_to_id ? {
-        id: row.reply_to_id,
-        text: row.reply_to_text,
-        sender_name: row.reply_to_sender_name,
-        direction: row.reply_to_direction,
-        created_at: row.reply_to_created_at
-      } : null
-    }));
+    return result.rows.map(row => {
+      // Format reactions from metadata
+      let reactions = [];
+      if (row.metadata && row.metadata.reactions && Array.isArray(row.metadata.reactions)) {
+        const reactionCounts: { [key: string]: { count: number; users: string[] } } = {};
+        row.metadata.reactions.forEach((r: any) => {
+          if (!reactionCounts[r.emoji]) {
+            reactionCounts[r.emoji] = { count: 0, users: [] };
+          }
+          reactionCounts[r.emoji].count++;
+          if (!reactionCounts[r.emoji].users.includes(r.user_id)) {
+            reactionCounts[r.emoji].users.push(r.user_id);
+          }
+        });
+        reactions = Object.keys(reactionCounts).map(emoji => ({
+          emoji,
+          count: reactionCounts[emoji].count,
+          users: reactionCounts[emoji].users
+        }));
+      }
+      
+      return {
+        ...row,
+        reactions,
+        reply_to_message: hasReplyToColumn && row.reply_to_id ? {
+          id: row.reply_to_id,
+          text: row.reply_to_text,
+          sender_name: row.reply_to_sender_name,
+          direction: row.reply_to_direction,
+          created_at: row.reply_to_created_at
+        } : null
+      };
+    });
   }
 
   /**
@@ -874,6 +898,88 @@ export class InboxService {
         message: `Deleted conversation ${conversationId} (${result.rows[0].channel_id})` 
       };
     } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Toggle reaction on a message
+   */
+  async toggleReaction(messageId: string, userId: string, emoji: string): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get the message
+      const msgResult = await client.query(
+        `SELECT id, metadata FROM messages WHERE id = $1`,
+        [messageId]
+      );
+
+      if (msgResult.rows.length === 0) {
+        throw new Error('Message not found');
+      }
+
+      const message = msgResult.rows[0];
+      let metadata = message.metadata || {};
+      let reactions = metadata.reactions || [];
+
+      // Find if user already reacted with this emoji
+      const existingIndex = reactions.findIndex((r: any) => r.emoji === emoji && r.user_id === userId);
+
+      if (existingIndex >= 0) {
+        // Remove reaction
+        reactions.splice(existingIndex, 1);
+      } else {
+        // Add reaction
+        reactions.push({
+          emoji,
+          user_id: userId,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      // Count reactions by emoji
+      const reactionCounts: { [key: string]: { count: number; users: string[] } } = {};
+      reactions.forEach((r: any) => {
+        if (!reactionCounts[r.emoji]) {
+          reactionCounts[r.emoji] = { count: 0, users: [] };
+        }
+        reactionCounts[r.emoji].count++;
+        if (!reactionCounts[r.emoji].users.includes(r.user_id)) {
+          reactionCounts[r.emoji].users.push(r.user_id);
+        }
+      });
+
+      // Format reactions for frontend: [{ emoji: '👍', count: 2, users: ['user1', 'user2'] }]
+      const formattedReactions = Object.keys(reactionCounts).map(emoji => ({
+        emoji,
+        count: reactionCounts[emoji].count,
+        users: reactionCounts[emoji].users
+      }));
+
+      // Update message metadata
+      metadata.reactions = reactions;
+      
+      const updateResult = await client.query(
+        `UPDATE messages 
+         SET metadata = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [JSON.stringify(metadata), messageId]
+      );
+
+      const updatedMessage = updateResult.rows[0];
+      
+      // Return message with formatted reactions
+      return {
+        ...updatedMessage,
+        reactions: formattedReactions
+      };
+    } catch (err: any) {
       await client.query('ROLLBACK');
       throw err;
     } finally {

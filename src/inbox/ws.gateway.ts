@@ -143,6 +143,35 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return false;
   }
+
+  @SubscribeMessage('typing')
+  async handleTyping(client: Socket, data: { conversation_id: string; user_id: string; user_name: string }) {
+    const socketData = (client as any).data as SocketData | undefined;
+    if (!socketData) return;
+
+    // Broadcast typing event to all users in this conversation
+    const sockets = await this.server.in('/ws').fetchSockets();
+    for (const socket of sockets) {
+      const sData = (socket as any).data as SocketData | undefined;
+      if (!sData) continue;
+
+      // Check if user can view this conversation
+      const canView = await this.canViewThread(sData, data.conversation_id);
+      if (canView && sData.userId !== data.user_id) {
+        socket.emit('typing', {
+          conversation_id: data.conversation_id,
+          user_id: data.user_id,
+          user_name: data.user_name
+        });
+      }
+    }
+  }
+
+  @SubscribeMessage('typing_stop')
+  async handleTypingStop(client: Socket, data: { conversation_id: string; user_id: string }) {
+    // Typing stop can be handled similarly if needed
+    // For now, typing indicator clears automatically after timeout on frontend
+  }
 }
 
 

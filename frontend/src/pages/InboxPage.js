@@ -1529,6 +1529,48 @@ const InboxPage = () => {
                 </Box>
               </Box>
 
+              {/* Media tabs filter */}
+              {selectedThread && (
+                <Box sx={{ px: 2, py: 1, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant={!selectedThread.mediaFilter || selectedThread.mediaFilter === 'all' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setSelectedThread({ ...selectedThread, mediaFilter: 'all' });
+                    }}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    size="small"
+                    variant={selectedThread.mediaFilter === 'photos' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setSelectedThread({ ...selectedThread, mediaFilter: 'photos' });
+                    }}
+                  >
+                    📷 Photos
+                  </Button>
+                  <Button
+                    size="small"
+                    variant={selectedThread.mediaFilter === 'videos' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setSelectedThread({ ...selectedThread, mediaFilter: 'videos' });
+                    }}
+                  >
+                    🎥 Videos
+                  </Button>
+                  <Button
+                    size="small"
+                    variant={selectedThread.mediaFilter === 'files' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setSelectedThread({ ...selectedThread, mediaFilter: 'files' });
+                    }}
+                  >
+                    📎 Files
+                  </Button>
+                </Box>
+              )}
+
               {/* Messages */}
               <Box 
                 ref={messagesContainerRef}
@@ -1722,19 +1764,19 @@ const InboxPage = () => {
                                     <Typography variant="caption" display="block">🎥 Video</Typography>
                                   )}
                                   {att.type === 'voice' && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <audio controls style={{ maxWidth: '100%' }}>
-                                        <source src={att.url || att.objectKey || ''} />
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexDirection: 'column', width: '100%' }}>
+                                      <Typography variant="caption" display="block" sx={{ mb: 1 }}>🎤 Voice message</Typography>
+                                      <audio controls style={{ maxWidth: '100%', width: '100%' }}>
+                                        <source src={att.url || (att.objectKey ? `${API_URL}/api/inbox/uploads/download/${encodeURIComponent(att.objectKey)}?url=true` : '')} />
                                       </audio>
-                                      <Typography variant="caption" display="block">🎤 Voice message</Typography>
                                     </Box>
                                   )}
                                   {att.type === 'audio' && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <audio controls style={{ maxWidth: '100%' }}>
-                                        <source src={att.url || att.objectKey || ''} />
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexDirection: 'column', width: '100%' }}>
+                                      <Typography variant="caption" display="block" sx={{ mb: 1 }}>🎵 {att.fileName || 'Audio'}</Typography>
+                                      <audio controls style={{ maxWidth: '100%', width: '100%' }}>
+                                        <source src={att.url || (att.objectKey ? `${API_URL}/api/inbox/uploads/download/${encodeURIComponent(att.objectKey)}?url=true` : '')} />
                                       </audio>
-                                      <Typography variant="caption" display="block">🎵 {att.fileName || 'Audio'}</Typography>
                                     </Box>
                                   )}
                                   {att.type === 'document' && (
@@ -1761,33 +1803,74 @@ const InboxPage = () => {
                                   label={`${reaction.emoji} ${reaction.count || 1}`}
                                   size="small"
                                   sx={{ height: 24, fontSize: '0.75rem' }}
-                                  onClick={() => {
+                                  onClick={async () => {
                                     // Toggle reaction
-                                    const currentReactions = msg.reactions || [];
-                                    const existing = currentReactions.find(r => r.emoji === reaction.emoji);
-                                    // This would need backend API to persist
-                                    console.log('Toggle reaction:', reaction.emoji);
+                                    try {
+                                      const token = localStorage.getItem('token');
+                                      const response = await fetch(`${API_URL}/api/inbox/messages/${msg.id}/reactions`, {
+                                        method: 'POST',
+                                        headers: {
+                                          'Authorization': `Bearer ${token}`,
+                                          'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({ emoji: reaction.emoji }),
+                                      });
+                                      if (response.ok) {
+                                        const updated = await response.json();
+                                        // Update message in state
+                                        setMessages(prev => prev.map(m => 
+                                          m.id === msg.id ? { ...m, reactions: updated.reactions || [] } : m
+                                        ));
+                                      }
+                                    } catch (err) {
+                                      console.error('Failed to toggle reaction:', err);
+                                    }
                                   }}
                                 />
                               ))}
                             </Box>
                           )}
-                          {/* Add reaction button - appears on hover */}
+                          {/* Add reaction button */}
                           <IconButton
                             size="small"
                             sx={{
                               position: 'absolute',
                               bottom: 4,
                               right: 4,
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              '&:hover': { opacity: 1 },
+                              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                              opacity: 0.7,
+                              '&:hover': { 
+                                backgroundColor: 'rgba(255, 255, 255, 1)',
+                                opacity: 1
+                              }
                             }}
-                            onClick={() => {
-                              const emoji = prompt('Choose emoji reaction:');
-                              if (emoji) {
-                                // This would need backend API
-                                console.log('Add reaction:', emoji, 'to message:', msg.id);
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const emoji = prompt('Choose emoji reaction (enter one emoji):');
+                              if (emoji && emoji.length <= 2) {
+                                try {
+                                  const token = localStorage.getItem('token');
+                                  const response = await fetch(`${API_URL}/api/inbox/messages/${msg.id}/reactions`, {
+                                    method: 'POST',
+                                    headers: {
+                                      'Authorization': `Bearer ${token}`,
+                                      'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({ emoji: emoji.trim() }),
+                                  });
+                                  if (response.ok) {
+                                    const updated = await response.json();
+                                    // Update message in state
+                                    setMessages(prev => prev.map(m => 
+                                      m.id === msg.id ? { ...m, reactions: updated.reactions || [] } : m
+                                    ));
+                                  } else {
+                                    alert('Failed to add reaction');
+                                  }
+                                } catch (err) {
+                                  console.error('Failed to add reaction:', err);
+                                  alert('Failed to add reaction');
+                                }
                               }
                             }}
                             title="Add reaction"
@@ -1938,7 +2021,7 @@ const InboxPage = () => {
                               {formatTime(msg.created_at, true)}
                               {msg.edited_at && ' (edited)'}
                             </Typography>
-                            {msg.direction === 'out' && (
+                            {msg.direction === 'out' && msg.delivery_status && (
                               <>
                                 {msg.delivery_status === 'queued' && (
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1992,30 +2075,30 @@ const InboxPage = () => {
                             right: 8,
                             display: 'flex',
                             gap: 0.5,
-                            opacity: 0,
-                            transition: 'opacity 0.2s',
-                            '&:hover': { opacity: 1 },
-                            '& .action-button': {
-                              backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.95)' }
-                            }
+                            zIndex: 10,
                           }}>
                             {msg.direction === 'out' && (
                               <IconButton
-                                className="action-button edit-button"
                                 size="small"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingMessageId(msg.id);
                                   setEditingMessageText(msg.text || '');
                                 }}
-                                title="Edit"
+                                title="Edit message"
+                                sx={{
+                                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                  opacity: 0.7,
+                                  '&:hover': { 
+                                    backgroundColor: 'rgba(255, 255, 255, 1)',
+                                    opacity: 1
+                                  }
+                                }}
                               >
                                 <EditIcon fontSize="small" />
                               </IconButton>
                             )}
                             <IconButton
-                              className="action-button reply-button"
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2026,6 +2109,14 @@ const InboxPage = () => {
                                 });
                               }}
                               title="Reply"
+                              sx={{
+                                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                opacity: 0.7,
+                                '&:hover': { 
+                                  backgroundColor: 'rgba(255, 255, 255, 1)',
+                                  opacity: 1
+                                }
+                              }}
                             >
                               <ReplyIcon fontSize="small" />
                             </IconButton>
