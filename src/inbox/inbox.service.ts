@@ -602,7 +602,7 @@ export class InboxService {
       // Search conversations by title, sender name, phone, username
       // Using LOWER() with LIKE for better compatibility
       const conversationsQuery = `
-        SELECT DISTINCT c.*
+        SELECT DISTINCT c.*, COALESCE(c.last_message_at, c.created_at) as sort_date
         FROM conversations c
         WHERE (
           (c.deleted_at IS NULL OR c.is_deleted = false OR c.is_deleted IS NULL)
@@ -618,7 +618,7 @@ export class InboxService {
             LOWER(COALESCE(c.external_chat_id, '')) LIKE LOWER($1)
           )
         )
-        ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
+        ORDER BY sort_date DESC
         LIMIT $2
       `;
 
@@ -628,7 +628,7 @@ export class InboxService {
       // Search messages by text content
       // Using LOWER() with LIKE for better compatibility
       const messagesQuery = `
-        SELECT DISTINCT m.*, c.chat_title, c.custom_name, c.channel_id, c.id as conversation_id_display
+        SELECT DISTINCT m.*, c.chat_title, c.custom_name, c.channel_id, c.id as conversation_id_display, m.created_at
         FROM messages m
         INNER JOIN conversations c ON m.conversation_id = c.id
         WHERE (
