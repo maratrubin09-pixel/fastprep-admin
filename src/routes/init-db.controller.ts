@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Inject } from '@nestjs/common';
+import { Controller, Post, Get, All, Inject } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
 import { Public } from '../auth/public.decorator';
@@ -10,8 +10,7 @@ export class InitDbController {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   @Public() // Миграция для добавления колонок и индексов
-  @Post('migrate')
-  @Get('migrate') // Добавляем GET для удобства запуска из браузера
+  @All('migrate') // Поддерживаем и GET и POST для удобства
   async migrateDatabase() {
     try {
       // Добавить колонки в outbox (если еще не добавлены)
