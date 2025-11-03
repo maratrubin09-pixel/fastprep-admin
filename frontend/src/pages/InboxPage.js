@@ -1612,13 +1612,16 @@ const InboxPage = () => {
                           sx={{
                             p: isGrouped ? 1.5 : 2,
                             pt: isGrouped && msg.direction === 'in' ? 0.5 : (isGrouped ? 1.5 : 2),
-                            maxWidth: '70%',
+                            maxWidth: { xs: '85%', sm: '75%', md: '65%', lg: '55%' },
+                            minWidth: 0,
                             backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
                             color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
                             border: msg.direction === 'in' ? '1px solid #e0e0e0' : '2px solid #BA68C8', // Фиолетовая рамка для исходящих
                             boxShadow: msg.direction === 'in' ? '0 1px 2px rgba(0,0,0,0.05)' : '0 1px 3px rgba(156,39,176,0.15)', // Мягкие тени
                             wordWrap: 'break-word',
                             overflowWrap: 'break-word',
+                            wordBreak: 'break-word',
+                            overflow: 'hidden',
                             position: 'relative',
                             borderRadius: isGrouped ? '12px' : '16px', // Меньше скругление для сгруппированных
                             '& .message-link': {
