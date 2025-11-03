@@ -18,6 +18,10 @@ const DashboardLayout = ({ children, title = 'Dashboard', onNewChatClick }) => {
   useEffect(() => {
     const fetchUser = async () => {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
       
       try {
         const response = await fetch(`${API_URL}/api/auth/me`, {
@@ -26,11 +30,46 @@ const DashboardLayout = ({ children, title = 'Dashboard', onNewChatClick }) => {
           },
         });
 
+        if (response.status === 401) {
+          // Token expired or invalid - try to get user from JWT token
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            const userFromToken = {
+              id: payload.sub || payload.id,
+              name: payload.name || payload.username || payload.email?.split('@')[0] || 'User',
+              email: payload.email,
+              role: payload.role || 'admin'
+            };
+            setUser(userFromToken);
+            console.log('Using user data from JWT token');
+          } catch (tokenErr) {
+            console.error('Failed to decode token:', tokenErr);
+            // Token is invalid - redirect to login
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+          }
+          return;
+        }
+
         if (!response.ok) throw new Error('Failed to fetch user');
         const data = await response.json();
         setUser(data);
       } catch (err) {
-        console.error(err);
+        console.error('Error fetching user:', err);
+        // Try to get user from token as fallback
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const userFromToken = {
+            id: payload.sub || payload.id,
+            name: payload.name || payload.username || payload.email?.split('@')[0] || 'User',
+            email: payload.email,
+            role: payload.role || 'admin'
+          };
+          setUser(userFromToken);
+          console.log('Using user data from JWT token as fallback');
+        } catch (tokenErr) {
+          console.error('Failed to decode token:', tokenErr);
+        }
       }
     };
 

@@ -706,8 +706,20 @@ const InboxPage = () => {
         },
       });
       
+      if (response.status === 401) {
+        // Token expired or invalid
+        console.error('401 Unauthorized - token may be expired');
+        setError('Authentication failed. Please refresh the page or log in again.');
+        // Try to clear invalid token and reload
+        setTimeout(() => {
+          localStorage.removeItem('token');
+          window.location.href = '/login';
+        }, 2000);
+        return;
+      }
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch conversations');
+        throw new Error(`Failed to fetch conversations: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
