@@ -2,6 +2,9 @@ import { Controller, Get, Post, Put, Delete, Param, Body, Query, BadRequestExcep
 import { IsString, IsOptional } from 'class-validator';
 import { S3Service } from '../storage/s3.service';
 import { InboxService } from './inbox.service';
+import { PresenceService } from './services/presence.service';
+import { ConversationSettingsService } from './services/conversation-settings.service';
+import { AuthzService } from '../authz/authz.service';
 import { TelegramService } from '../messengers/telegram/telegram.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
 
@@ -21,7 +24,8 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 class SendMessageDto {
   @IsString()
-  text!: string;
+  @IsOptional()
+  text?: string;
   
   @IsOptional()
   @IsString()
@@ -30,6 +34,10 @@ class SendMessageDto {
   @IsOptional()
   @IsString()
   replyTo?: string; // UUID сообщения, на которое отвечаем
+  
+  @IsOptional()
+  @IsString()
+  stickerId?: string; // Sticker ID for Telegram
 }
 
 @Controller('inbox')
@@ -37,6 +45,9 @@ export class MessagesController {
   constructor(
     private s3: S3Service,
     private inbox: InboxService,
+    private presence: PresenceService,
+    private settings: ConversationSettingsService,
+    private authz: AuthzService,
     @Inject(forwardRef(() => TelegramService))
     private telegramService: TelegramService
   ) {}
@@ -161,10 +172,15 @@ export class MessagesController {
       }
     }
 
+    // Validation: must have text, objectKey, or stickerId
+    if (!dto.text && !dto.objectKey && !dto.stickerId) {
+      throw new BadRequestException('Message must have text, attachment, or sticker');
+    }
+
     // Создание сообщения + outbox + audit (возвращает полные данные сообщения)
-    console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, replyTo=${dto.replyTo || 'null'}`);
-    console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, replyTo: dto.replyTo, textLength: dto.text?.length || 0 }));
-    const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text, dto.objectKey, dto.replyTo);
+    console.log(`📤 Creating outgoing message: threadId=${threadId}, userId=${userId}, hasObjectKey=${!!dto.objectKey}, replyTo=${dto.replyTo || 'null'}, stickerId=${dto.stickerId || 'null'}`);
+    console.log(`📤 Full DTO received:`, JSON.stringify({ text: dto.text, objectKey: dto.objectKey, replyTo: dto.replyTo, stickerId: dto.stickerId, textLength: dto.text?.length || 0 }));
+    const message = await this.inbox.createOutgoingMessage(threadId, userId, dto.text || '', dto.objectKey, dto.replyTo, dto.stickerId);
     console.log(`✅ Outgoing message created successfully: messageId=${message.id}, hasObjectKey=${!!message.object_key}, objectKey=${message.object_key || 'null'}`);
 
     // Получаем полное сообщение с reply_to_message для отображения
@@ -375,6 +391,258 @@ export class MessagesController {
 
     const updatedMessage = await this.inbox.toggleReaction(messageId, userId, body.emoji.trim());
     return updatedMessage;
+  }
+
+  /**
+   * POST /api/inbox/messages/:id/pin
+   * Pin a message (max 5 per conversation)
+   */
+  @Post('messages/:id/pin')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.pin')
+  async pinMessage(@Param('id') messageId: string, @Body() body: { order?: number }, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    try {
+      const pinnedMessage = await this.inbox.pinMessage(messageId, userId, body.order);
+      
+      // Emit WS event
+      if (pinnedMessage.conversation_id) {
+        // Import WsGateway if needed - will add later in PR9
+        // For now, message.pinned event will be handled separately
+      }
+
+      return pinnedMessage;
+    } catch (err: any) {
+      if (err.message.includes('Maximum 5 pinned messages')) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * DELETE /api/inbox/messages/:id/pin
+   * Unpin a message
+   */
+  @Delete('messages/:id/pin')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.pin')
+  async unpinMessage(@Param('id') messageId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const unpinnedMessage = await this.inbox.unpinMessage(messageId);
+    return unpinnedMessage;
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/pinned
+   * Get pinned messages for conversation (top 5)
+   */
+  @Get('conversations/:id/pinned')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getPinnedMessages(@Param('id') conversationId: string) {
+    const pinned = await this.inbox.getPinnedMessages(conversationId);
+    return pinned;
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/media
+   * Get media messages with cursor-based pagination
+   */
+  @Get('conversations/:id/media')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getMediaMessages(
+    @Param('id') conversationId: string,
+    @Query('kind') kind: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limitStr?: string
+  ) {
+    const limit = limitStr ? parseInt(limitStr, 10) : 20;
+    if (!kind || !['image', 'video', 'file', 'sticker'].includes(kind)) {
+      throw new BadRequestException('Invalid kind parameter');
+    }
+
+    const result = await this.inbox.getMediaMessages(conversationId, kind, cursor, limit);
+    return result;
+  }
+
+  /**
+   * GET /api/inbox/users/online
+   * Get list of online user IDs
+   */
+  @Get('users/online')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getOnlineUsers() {
+    const online = await this.presence.getOnlineUsers();
+    return { user_ids: online };
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/participants/status
+   * Get online status of participants in conversation
+   */
+  @Get('conversations/:id/participants/status')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getParticipantsStatus(@Param('id') conversationId: string) {
+    // Get conversation to find sender
+    const conv = await this.inbox.getConversation(conversationId);
+    if (!conv) {
+      throw new BadRequestException('Conversation not found');
+    }
+
+    // For now, return sender status (can be extended for group chats)
+    const statuses: any[] = [];
+    if (conv.sender_id) {
+      const isOnline = await this.presence.isOnline(conv.sender_id);
+      const lastSeen = await this.presence.getLastSeen(conv.sender_id);
+      statuses.push({
+        user_id: conv.sender_id,
+        is_online: isOnline,
+        last_seen: lastSeen?.toISOString() || null
+      });
+    }
+
+    return { participants: statuses };
+  }
+
+  /**
+   * POST /api/inbox/conversations/:id/mute
+   * Mute conversation
+   */
+  @Post('conversations/:id/mute')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.mute')
+  async muteConversation(
+    @Param('id') conversationId: string,
+    @Body() body: { until?: string },
+    @Req() req: any
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const until = body.until ? new Date(body.until) : undefined;
+    const settings = await this.settings.muteConversation(conversationId, userId, until);
+    return settings;
+  }
+
+  /**
+   * POST /api/inbox/conversations/:id/unmute
+   * Unmute conversation
+   */
+  @Post('conversations/:id/unmute')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.mute')
+  async unmuteConversation(@Param('id') conversationId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    await this.settings.unmuteConversation(conversationId, userId);
+    return { success: true };
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/settings
+   * Get conversation settings for current user
+   */
+  @Get('conversations/:id/settings')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getSettings(@Param('id') conversationId: string, @Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const settings = await this.settings.getSettings(conversationId, userId);
+    return settings;
+  }
+
+  /**
+   * GET /api/inbox/conversations/:id/profile
+   * Get conversation profile
+   */
+  @Get('conversations/:id/profile')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.profile.read')
+  async getProfile(@Param('id') conversationId: string) {
+    const conv = await this.inbox.getConversation(conversationId);
+    if (!conv) {
+      throw new BadRequestException('Conversation not found');
+    }
+
+    // Get message stats
+    const stats = await this.inbox.getConversationStats(conversationId);
+
+    // Get presence if sender_id exists
+    let presence = null;
+    if (conv.sender_id) {
+      const isOnline = await this.presence.isOnline(conv.sender_id);
+      const lastSeen = await this.presence.getLastSeen(conv.sender_id);
+      presence = {
+        is_online: isOnline,
+        last_seen: lastSeen?.toISOString() || null
+      };
+    }
+
+    return {
+      sender_id: conv.sender_id,
+      sender_first_name: conv.sender_first_name,
+      sender_last_name: conv.sender_last_name,
+      sender_username: conv.sender_username,
+      sender_phone: conv.sender_phone,
+      sender_photo_url: conv.sender_photo_url,
+      sender_bio: conv.sender_bio,
+      sender_verified: conv.sender_verified || false,
+      presence,
+      stats
+    };
+  }
+
+  /**
+   * PUT /api/inbox/conversations/:id/profile
+   * Update conversation profile (admin only)
+   */
+  @Put('conversations/:id/profile')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.profile.manage')
+  async updateProfile(
+    @Param('id') conversationId: string,
+    @Body() body: { sender_photo_url?: string; sender_bio?: string; sender_verified?: boolean },
+    @Req() req: any
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    // Check if user has admin role (simplified check)
+    const ep = await this.authz.getEffectivePermissions(userId);
+    if (!ep.permissions.includes('inbox.profile.manage')) {
+      throw new BadRequestException('Only admins can update profiles');
+    }
+
+    await this.inbox.updateConversation(conversationId, {
+      sender_photo_url: body.sender_photo_url,
+      sender_bio: body.sender_bio,
+      sender_verified: body.sender_verified
+    });
+
+    return { success: true };
   }
 }
 

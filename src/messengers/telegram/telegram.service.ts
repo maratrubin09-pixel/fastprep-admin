@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { NewMessage } from 'telegram/events';
@@ -12,6 +12,8 @@ import { Gauge, register } from 'prom-client';
 import { S3Service } from '../../storage/s3.service';
 import { v4 as uuidv4 } from 'uuid';
 import { get } from 'https';
+import { Pool } from 'pg';
+import { PG_POOL } from '../../db/db.module';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -23,7 +25,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly connectionStatus: Gauge<string>;
 
   constructor(
-    private s3Service: S3Service
+    private s3Service: S3Service,
+    @Inject(PG_POOL) private pool: Pool
   ) {
     this.connectionStatus = new Gauge({
       name: 'telegram_connection_status',
@@ -1003,6 +1006,43 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     } catch (error: any) {
       this.logger.error(`❌ Failed to upload media to S3: ${error.message}`);
       return null;
+    }
+  }
+
+  /**
+   * Send sticker to Telegram chat
+   */
+  async sendSticker(conversationId: string, stickerId: string): Promise<void> {
+    if (!this.isReady || !this.client) {
+      throw new Error('Telegram client not ready');
+    }
+
+    try {
+      // Get conversation to find telegram_peer_id
+      const result = await this.pool.query(
+        `SELECT telegram_peer_id, channel_id FROM conversations WHERE id = $1`,
+        [conversationId]
+      );
+
+      if (result.rows.length === 0 || !result.rows[0].telegram_peer_id) {
+        throw new Error('Conversation not found or not a Telegram conversation');
+      }
+
+      const peerId = result.rows[0].telegram_peer_id;
+      const channelId = result.rows[0].channel_id;
+      
+      // Use resolveEntity to get input peer
+      const inputPeer = await this.resolveEntity(channelId, peerId);
+
+      // Send sticker using Telegram API
+      await this.client.sendFile(inputPeer, {
+        sticker: stickerId as any, // Telegram sticker file ID
+      });
+
+      this.logger.log(`✅ Sticker sent: conversationId=${conversationId}, stickerId=${stickerId}`);
+    } catch (err: any) {
+      this.logger.error(`❌ Failed to send sticker: ${err.message}`);
+      throw err;
     }
   }
 

@@ -40,6 +40,8 @@ import {
   Clear as ClearIcon,
   InsertEmoticon as EmoticonIcon,
   ContentCopy as TemplateIcon,
+  Note as NoteIcon,
+  PushPin as PinIcon,
 } from '@mui/icons-material';
 import { useMediaQuery as useMuiMediaQuery } from '@mui/material';
 import { io } from 'socket.io-client';
@@ -47,6 +49,7 @@ import Linkify from 'linkify-react';
 import DashboardLayout from '../components/DashboardLayout';
 import FileUpload from '../components/FileUpload';
 import NewChatModal from '../components/NewChatModal';
+import NotePanel from '../components/NotePanel';
 import { MOBILE_MAX, TABLET_MAX } from '../utils/breakpoints';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://fastprep-admin-api.onrender.com';
@@ -259,6 +262,8 @@ const InboxPage = () => {
   const [templates, setTemplates] = useState([]); // Шаблоны сообщений
   const [showTemplates, setShowTemplates] = useState(false); // Показать/скрыть шаблоны
   const [showEmojiPicker, setShowEmojiPicker] = useState(false); // Показать/скрыть emoji picker
+  const [showNotePanel, setShowNotePanel] = useState(false); // Показать панель заметок
+  const [pinnedMessages, setPinnedMessages] = useState([]); // Закрепленные сообщения
   
   // Responsive design
   const isMobile = useMuiMediaQuery(`(max-width: ${MOBILE_MAX}px)`);
@@ -473,6 +478,7 @@ const InboxPage = () => {
   useEffect(() => {
     if (selectedThread) {
       fetchMessages(selectedThread.id);
+      fetchPinnedMessages(selectedThread.id);
       setReplyingTo(null); // Сбрасываем reply при смене чата
       
       // Сначала очищаем поле ввода
@@ -792,6 +798,72 @@ const InboxPage = () => {
       }
     };
   }, [searchQuery]);
+
+  const fetchPinnedMessages = async (threadId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/api/inbox/conversations/${threadId}/pinned`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPinnedMessages(data);
+      }
+    } catch (err) {
+      console.error('Error fetching pinned messages:', err);
+    }
+  };
+
+  const handlePinMessage = async (messageId, isPinned) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (isPinned) {
+        // Unpin
+        const response = await fetch(`${API_URL}/api/inbox/messages/${messageId}/pin`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          // Update local state
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_pinned: false } : m));
+          // Reload pinned messages
+          if (selectedThread) {
+            fetchPinnedMessages(selectedThread.id);
+          }
+        }
+      } else {
+        // Pin
+        const response = await fetch(`${API_URL}/api/inbox/messages/${messageId}/pin`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
+        if (response.ok) {
+          const pinned = await response.json();
+          // Update local state
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_pinned: true, pinned_at: pinned.pinned_at } : m));
+          // Reload pinned messages
+          if (selectedThread) {
+            fetchPinnedMessages(selectedThread.id);
+          }
+        } else if (response.status === 400) {
+          const error = await response.json();
+          alert(error.message || 'Failed to pin message. Maximum 5 pinned messages allowed.');
+        }
+      }
+    } catch (err) {
+      console.error('Error pinning/unpinning message:', err);
+      alert('Failed to pin/unpin message');
+    }
+  };
 
   const fetchMessages = async (threadId) => {
     try {
@@ -1518,6 +1590,13 @@ const InboxPage = () => {
                         <EditIcon />
                       </IconButton>
                       <IconButton
+                        onClick={() => setShowNotePanel(true)}
+                        sx={{ color: 'text.secondary' }}
+                        title="Internal notes"
+                      >
+                        <NoteIcon />
+                      </IconButton>
+                      <IconButton
                         onClick={handleArchiveConversation}
                         sx={{ color: 'text.secondary' }}
                         title="Archive conversation"
@@ -1568,6 +1647,58 @@ const InboxPage = () => {
                   >
                     📎 Files
                   </Button>
+                </Box>
+              )}
+
+              {/* Pinned Messages Section */}
+              {pinnedMessages.length > 0 && (
+                <Box sx={{ 
+                  px: 2, 
+                  py: 1, 
+                  borderBottom: '1px solid', 
+                  borderColor: 'divider',
+                  backgroundColor: 'rgba(156, 39, 176, 0.05)'
+                }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <PinIcon sx={{ fontSize: 14 }} /> Pinned ({pinnedMessages.length})
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    {pinnedMessages.map((pinned) => (
+                      <Paper
+                        key={pinned.id}
+                        sx={{
+                          p: 1,
+                          cursor: 'pointer',
+                          '&:hover': { backgroundColor: 'rgba(156, 39, 176, 0.1)' }
+                        }}
+                        onClick={() => {
+                          // Scroll to message in chat
+                          const messageEl = document.querySelector(`[data-message-id="${pinned.id}"]`);
+                          if (messageEl) {
+                            messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            // Highlight briefly
+                            messageEl.style.backgroundColor = 'rgba(156, 39, 176, 0.2)';
+                            setTimeout(() => {
+                              messageEl.style.backgroundColor = '';
+                            }, 2000);
+                          }
+                        }}
+                      >
+                        <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', mb: 0.5 }}>
+                          {pinned.sender_name || (pinned.direction === 'out' ? 'You' : 'Unknown')}
+                        </Typography>
+                        <Typography variant="body2" sx={{ 
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical'
+                        }}>
+                          {pinned.text || '[Media]'}
+                        </Typography>
+                      </Paper>
+                    ))}
+                  </Box>
                 </Box>
               )}
 
@@ -1647,6 +1778,7 @@ const InboxPage = () => {
                         return (
                       <Box
                         key={msg.id}
+                        data-message-id={msg.id}
                         sx={{
                           display: 'flex',
                           justifyContent: msg.direction === 'out' ? 'flex-end' : 'flex-start',
@@ -2102,6 +2234,25 @@ const InboxPage = () => {
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                handlePinMessage(msg.id, msg.is_pinned);
+                              }}
+                              title={msg.is_pinned ? "Unpin message" : "Pin message"}
+                              sx={{
+                                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                opacity: 0.7,
+                                color: msg.is_pinned ? 'primary.main' : 'inherit',
+                                '&:hover': { 
+                                  backgroundColor: 'rgba(255, 255, 255, 1)',
+                                  opacity: 1
+                                }
+                              }}
+                            >
+                              <PinIcon fontSize="small" sx={{ transform: msg.is_pinned ? 'rotate(0deg)' : 'rotate(45deg)' }} />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setReplyingTo({ 
                                   id: msg.id, 
                                   text: msg.text, 
@@ -2391,6 +2542,15 @@ const InboxPage = () => {
           )}
         </Paper>
       </Box>
+      
+      {/* Note Panel */}
+      {selectedThread && (
+        <NotePanel
+          open={showNotePanel}
+          onClose={() => setShowNotePanel(false)}
+          conversationId={selectedThread.id}
+        />
+      )}
     </DashboardLayout>
   );
 };

@@ -11,6 +11,7 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { AuthzService } from '../authz/authz.service';
 import { InboxService } from './inbox.service';
+import { PresenceService } from './services/presence.service';
 
 interface SocketData {
   userId: string;
@@ -26,7 +27,8 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     @Inject(REDIS_CLIENT) private redis: Redis,
     private authz: AuthzService,
-    private inbox: InboxService
+    private inbox: InboxService,
+    private presence: PresenceService
   ) {
     // Отдельный Redis-клиент для подписки
     this.redisSub = this.redis.duplicate();
@@ -58,12 +60,38 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const data: SocketData = { userId, ep };
     (client as any).data = data;
 
+    // Mark user as online
+    await this.presence.setOnline(userId);
+
+    // Broadcast user online event
+    await this.broadcastUserStatus(userId, 'online');
+
     // Отправляем hello
     client.emit('hello', { ver: ep.ver, perms: ep.permissions });
   }
 
-  handleDisconnect(client: Socket) {
-    // Cleanup if needed
+  async handleDisconnect(client: Socket) {
+    const socketData = (client as any).data as SocketData | undefined;
+    if (socketData?.userId) {
+      // Mark user as offline
+      await this.presence.setOffline(socketData.userId);
+      
+      // Broadcast user offline event
+      await this.broadcastUserStatus(socketData.userId, 'offline');
+    }
+  }
+
+  /**
+   * Broadcast user status change to relevant conversations
+   */
+  private async broadcastUserStatus(userId: string, status: 'online' | 'offline'): Promise<void> {
+    const sockets = await this.server.in('/ws').fetchSockets();
+    for (const socket of sockets) {
+      const sData = (socket as any).data as SocketData | undefined;
+      if (!sData || sData.userId === userId) continue;
+
+      socket.emit(`user.${status}`, { user_id: userId });
+    }
   }
 
   /**
@@ -171,6 +199,17 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleTypingStop(client: Socket, data: { conversation_id: string; user_id: string }) {
     // Typing stop can be handled similarly if needed
     // For now, typing indicator clears automatically after timeout on frontend
+  }
+
+  /**
+   * Handle heartbeat for presence
+   */
+  @SubscribeMessage('presence:heartbeat')
+  async handleHeartbeat(client: Socket) {
+    const socketData = (client as any).data as SocketData | undefined;
+    if (socketData?.userId) {
+      await this.presence.updateLastSeen(socketData.userId);
+    }
   }
 }
 

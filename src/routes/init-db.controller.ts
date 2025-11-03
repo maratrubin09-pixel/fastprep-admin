@@ -124,9 +124,109 @@ export class InitDbController {
         ON outbox (status, scheduled_at ASC);
       `);
 
+      // PR1: Internal Notes
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS conversation_notes (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          note_text text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_notes_conv ON conversation_notes(conversation_id);
+      `);
+
+      // PR2: Pinned Messages
+      await this.pool.query(`
+        ALTER TABLE messages
+          ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS pinned_at timestamptz,
+          ADD COLUMN IF NOT EXISTS pinned_by uuid REFERENCES users(id),
+          ADD COLUMN IF NOT EXISTS pinned_order smallint;
+      `);
+      await this.pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_pinned_order
+          ON messages(conversation_id, pinned_order)
+          WHERE is_pinned = true;
+      `);
+
+      // PR3: Media thumbnails
+      await this.pool.query(`
+        ALTER TABLE messages
+          ADD COLUMN IF NOT EXISTS has_attachments boolean NOT NULL DEFAULT false;
+      `);
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS message_media (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          kind text NOT NULL CHECK (kind IN ('image','video','file','sticker')),
+          storage_key text NOT NULL,
+          thumb_storage_key text,
+          content_type text,
+          width int, height int,
+          size_bytes int,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_media_msg_kind ON message_media(message_id, kind);
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_media_kind_created ON message_media(kind, created_at DESC);
+      `);
+
+      // PR4: Stickers
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS message_stickers (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          sticker_id text NOT NULL,
+          sticker_set_id text,
+          emoji text,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_stickers_msg ON message_stickers(message_id);
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_stickers_set ON message_stickers(sticker_set_id) WHERE sticker_set_id IS NOT NULL;
+      `);
+
+      // PR6: Last Message Preview
+      await this.pool.query(`
+        ALTER TABLE conversations
+          ADD COLUMN IF NOT EXISTS last_message_preview text;
+      `);
+
+      // PR7: Mute
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS conversation_user_settings (
+          conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          is_muted boolean NOT NULL DEFAULT false,
+          muted_until timestamptz,
+          PRIMARY KEY (conversation_id, user_id)
+        );
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_cus_muted ON conversation_user_settings(is_muted, muted_until);
+      `);
+
+      // PR8: Profile View
+      await this.pool.query(`
+        ALTER TABLE conversations
+          ADD COLUMN IF NOT EXISTS sender_photo_url text,
+          ADD COLUMN IF NOT EXISTS sender_bio text,
+          ADD COLUMN IF NOT EXISTS sender_verified boolean DEFAULT false;
+      `);
+
       return { 
         success: true, 
-        message: 'Migration completed: added columns and indexes for Phase 1' 
+        message: 'Migration completed: added columns and indexes for Phase 1 + PR1-PR8' 
       };
     } catch (error: any) {
       return { 

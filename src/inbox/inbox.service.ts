@@ -86,7 +86,8 @@ export class InboxService {
     senderId: string,
     text: string,
     objectKey?: string,
-    replyTo?: string
+    replyTo?: string,
+    stickerId?: string
   ): Promise<any> {
     const client = await this.pool.connect();
     try {
@@ -125,17 +126,46 @@ export class InboxService {
       );
       console.log(`✅ Outbox entry created: message_id=${message.id}, conversation_id=${threadId}, outbox_id=${outboxRes.rows[0].id}`);
 
+      // Save sticker if provided
+      if (stickerId) {
+        await client.query(
+          `INSERT INTO message_stickers (message_id, sticker_id, created_at)
+           VALUES ($1, $2, NOW())`,
+          [message.id, stickerId]
+        );
+      }
+
       // audit_log (с EP-snapshot — упрощённо)
       await client.query(
         `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, created_at)
          VALUES ($1, 'message.send', 'message', $2, $3, NOW())`,
-        [senderId, message.id, JSON.stringify({ threadId, text: text ? text.substring(0, 50) : '' })]
+        [senderId, message.id, JSON.stringify({ threadId, text: text ? text.substring(0, 50) : '', stickerId: stickerId || null })]
       );
 
-      // Update conversation's last_message_at
+      // Update conversation's last_message_at and preview
+      let preview = text ? text.substring(0, 100).trim() : '';
+      if (stickerId) {
+        preview = '[Sticker]';
+      } else if (objectKey) {
+        const contentType = objectKey.split('.').pop()?.toLowerCase();
+        if (contentType && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(contentType)) {
+          preview = '[Photo]';
+        } else if (contentType && ['mp4', 'mov', 'avi', 'webm'].includes(contentType)) {
+          preview = '[Video]';
+        } else if (contentType && ['mp3', 'wav', 'ogg'].includes(contentType)) {
+          preview = '[Voice]';
+        } else {
+          preview = '[File]';
+        }
+      }
+      
       await client.query(
-        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [threadId]
+        `UPDATE conversations 
+         SET last_message_at = NOW(), 
+             last_message_preview = $2,
+             updated_at = NOW() 
+         WHERE id = $1`,
+        [threadId, preview || null]
       );
 
       await client.query('COMMIT');
@@ -499,13 +529,45 @@ export class InboxService {
   /**
    * Update conversation (e.g., custom_name)
    */
-  async updateConversation(id: string, updates: { custom_name?: string }): Promise<void> {
-    if (updates.custom_name !== undefined) {
-      await this.pool.query(
-        `UPDATE conversations SET custom_name = $1, updated_at = NOW() WHERE id = $2`,
-        [updates.custom_name, id]
-      );
+  async updateConversation(
+    id: string, 
+    updates: { 
+      custom_name?: string;
+      sender_photo_url?: string;
+      sender_bio?: string;
+      sender_verified?: boolean;
     }
+  ): Promise<void> {
+    const updatesList: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (updates.custom_name !== undefined) {
+      updatesList.push(`custom_name = $${paramIndex++}`);
+      values.push(updates.custom_name);
+    }
+    if (updates.sender_photo_url !== undefined) {
+      updatesList.push(`sender_photo_url = $${paramIndex++}`);
+      values.push(updates.sender_photo_url);
+    }
+    if (updates.sender_bio !== undefined) {
+      updatesList.push(`sender_bio = $${paramIndex++}`);
+      values.push(updates.sender_bio);
+    }
+    if (updates.sender_verified !== undefined) {
+      updatesList.push(`sender_verified = $${paramIndex++}`);
+      values.push(updates.sender_verified);
+    }
+
+    if (updatesList.length === 0) {
+      return; // Nothing to update
+    }
+
+    values.push(id);
+    await this.pool.query(
+      `UPDATE conversations SET ${updatesList.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex}`,
+      values
+    );
   }
 
   /**
@@ -985,6 +1047,210 @@ export class InboxService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Pin a message (max 5 pins per conversation)
+   */
+  async pinMessage(messageId: string, userId: string, order?: number): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get message
+      const msgResult = await client.query(
+        `SELECT conversation_id FROM messages WHERE id = $1`,
+        [messageId]
+      );
+
+      if (msgResult.rows.length === 0) {
+        throw new Error('Message not found');
+      }
+
+      const conversationId = msgResult.rows[0].conversation_id;
+
+      // Check current pinned count
+      const pinnedCount = await client.query(
+        `SELECT COUNT(*) as count FROM messages 
+         WHERE conversation_id = $1 AND is_pinned = true`,
+        [conversationId]
+      );
+
+      const count = parseInt(pinnedCount.rows[0].count, 10);
+
+      // Max 5 pins
+      if (count >= 5 && !order) {
+        await client.query('ROLLBACK');
+        throw new Error('Maximum 5 pinned messages allowed per conversation');
+      }
+
+      // If order not provided, assign next available
+      let pinnedOrder = order;
+      if (!pinnedOrder) {
+        const maxOrderResult = await client.query(
+          `SELECT COALESCE(MAX(pinned_order), 0) as max_order 
+           FROM messages WHERE conversation_id = $1 AND is_pinned = true`,
+          [conversationId]
+        );
+        pinnedOrder = (parseInt(maxOrderResult.rows[0].max_order, 10) || 0) + 1;
+      } else {
+        // Shift existing pins if order conflicts
+        await client.query(
+          `UPDATE messages 
+           SET pinned_order = pinned_order + 1 
+           WHERE conversation_id = $1 AND is_pinned = true AND pinned_order >= $2`,
+          [conversationId, pinnedOrder]
+        );
+      }
+
+      // Pin the message
+      const result = await client.query(
+        `UPDATE messages 
+         SET is_pinned = true, pinned_at = NOW(), pinned_by = $1, pinned_order = $2
+         WHERE id = $3
+         RETURNING *`,
+        [userId, pinnedOrder, messageId]
+      );
+
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Unpin a message
+   */
+  async unpinMessage(messageId: string): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get message info
+      const msgResult = await client.query(
+        `SELECT conversation_id, pinned_order FROM messages WHERE id = $1`,
+        [messageId]
+      );
+
+      if (msgResult.rows.length === 0) {
+        throw new Error('Message not found');
+      }
+
+      const conversationId = msgResult.rows[0].conversation_id;
+      const oldOrder = msgResult.rows[0].pinned_order;
+
+      // Unpin the message
+      const result = await client.query(
+        `UPDATE messages 
+         SET is_pinned = false, pinned_at = NULL, pinned_by = NULL, pinned_order = NULL
+         WHERE id = $1
+         RETURNING *`,
+        [messageId]
+      );
+
+      // Shift remaining pins down
+      if (oldOrder) {
+        await client.query(
+          `UPDATE messages 
+           SET pinned_order = pinned_order - 1 
+           WHERE conversation_id = $1 AND is_pinned = true AND pinned_order > $2`,
+          [conversationId, oldOrder]
+        );
+      }
+
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Get pinned messages for a conversation (top 5)
+   */
+  async getPinnedMessages(conversationId: string): Promise<any[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM messages 
+       WHERE conversation_id = $1 AND is_pinned = true 
+       ORDER BY pinned_order ASC 
+       LIMIT 5`,
+      [conversationId]
+    );
+
+    return result.rows;
+  }
+
+  /**
+   * Get media messages with cursor-based pagination
+   */
+  async getMediaMessages(
+    conversationId: string,
+    kind: string,
+    cursor?: string,
+    limit: number = 20
+  ): Promise<{ items: any[]; nextCursor?: string }> {
+    let query = `
+      SELECT m.*, mm.id as media_id, mm.kind, mm.storage_key, mm.thumb_storage_key, 
+             mm.content_type, mm.width, mm.height, mm.size_bytes
+      FROM message_media mm
+      JOIN messages m ON mm.message_id = m.id
+      WHERE m.conversation_id = $1 AND mm.kind = $2
+    `;
+    const params: any[] = [conversationId, kind];
+
+    if (cursor) {
+      query += ` AND mm.created_at < (SELECT created_at FROM message_media WHERE id = $3)`;
+      params.push(cursor);
+    }
+
+    query += ` ORDER BY mm.created_at DESC LIMIT $${params.length + 1}`;
+    params.push(limit + 1); // Fetch one extra to check if there's more
+
+    const result = await this.pool.query(query, params);
+
+    const items = result.rows.slice(0, limit);
+    const nextCursor = result.rows.length > limit ? result.rows[limit - 1].media_id : undefined;
+
+    return { items, nextCursor };
+  }
+
+  /**
+   * Get conversation by ID
+   */
+  async getConversation(conversationId: string): Promise<any | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM conversations WHERE id = $1`,
+      [conversationId]
+    );
+    return result.rows.length > 0 ? result.rows[0] : null;
+  }
+
+  /**
+   * Get conversation statistics
+   */
+  async getConversationStats(conversationId: string): Promise<any> {
+    const msgStats = await this.pool.query(
+      `SELECT 
+         COUNT(*) as total_messages,
+         MIN(created_at) as first_message_at,
+         MAX(created_at) as last_message_at
+       FROM messages 
+       WHERE conversation_id = $1`,
+      [conversationId]
+    );
+
+    return msgStats.rows[0] || {
+      total_messages: 0,
+      first_message_at: null,
+      last_message_at: null
+    };
   }
 }
 

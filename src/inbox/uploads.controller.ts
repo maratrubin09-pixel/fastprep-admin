@@ -1,7 +1,9 @@
-import { Controller, Post, Get, Body, Param, BadRequestException, UseGuards, Res, Req } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, BadRequestException, UseGuards, Res, Req, Inject } from '@nestjs/common';
 import { S3Service } from '../storage/s3.service';
 import { PepGuard, RequirePerm } from '../authz/pep.guard';
 import { Response } from 'express';
+import { Pool } from 'pg';
+import { PG_POOL } from '../db/db.module';
 
 // Расширенный список разрешенных типов медиафайлов
 const ALLOWED_TYPES = [
@@ -44,7 +46,10 @@ class PresignRequestDto {
 
 @Controller('inbox/uploads')
 export class UploadsController {
-  constructor(private s3: S3Service) {}
+  constructor(
+    private s3: S3Service,
+    @Inject(PG_POOL) private pool: Pool
+  ) {}
 
   /**
    * POST /api/inbox/uploads/presign
@@ -159,6 +164,30 @@ export class UploadsController {
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Failed to generate download URL');
     }
+  }
+
+  /**
+   * GET /api/inbox/uploads/thumbnail/:id
+   * Get presigned URL for thumbnail
+   */
+  @Get('thumbnail/:id')
+  @UseGuards(PepGuard)
+  @RequirePerm('inbox.view')
+  async getThumbnail(@Param('id') mediaId: string) {
+    // Get media record to find thumb_storage_key
+    const result = await this.pool.query(
+      `SELECT thumb_storage_key, storage_key FROM message_media WHERE id = $1`,
+      [mediaId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new BadRequestException('Media not found');
+    }
+
+    const thumbKey = result.rows[0].thumb_storage_key || result.rows[0].storage_key;
+    const url = await this.s3.createPresignedGet(thumbKey, 900); // 15 minutes
+
+    return { url };
   }
 }
 
