@@ -399,7 +399,7 @@ export class MessagesController {
    */
   @Post('messages/:id/pin')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.pin')
+  @RequirePerm('inbox.view')
   async pinMessage(@Param('id') messageId: string, @Body() body: { order?: number }, @Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {
@@ -430,7 +430,7 @@ export class MessagesController {
    */
   @Delete('messages/:id/pin')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.pin')
+  @RequirePerm('inbox.view')
   async unpinMessage(@Param('id') messageId: string, @Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {
