@@ -34,14 +34,26 @@ const DashboardLayout = ({ children, title = 'Dashboard', onNewChatClick }) => {
           // Token expired or invalid - try to get user from JWT token
           try {
             const payload = JSON.parse(atob(token.split('.')[1]));
+            // Попробуем разные варианты имени из токена
+            let userName = payload.name || payload.username || payload.full_name;
+            if (!userName && (payload.first_name || payload.last_name)) {
+              userName = [payload.first_name, payload.last_name].filter(Boolean).join(' ');
+            }
+            if (!userName && payload.email) {
+              userName = payload.email.split('@')[0];
+            }
+            if (!userName) {
+              userName = 'User';
+            }
+            
             const userFromToken = {
               id: payload.sub || payload.id,
-              name: payload.name || payload.username || payload.email?.split('@')[0] || 'User',
+              name: userName,
               email: payload.email,
               role: payload.role || 'admin'
             };
             setUser(userFromToken);
-            console.log('Using user data from JWT token');
+            console.log('Using user data from JWT token:', userFromToken);
           } catch (tokenErr) {
             console.error('Failed to decode token:', tokenErr);
             // Token is invalid - redirect to login
@@ -59,14 +71,26 @@ const DashboardLayout = ({ children, title = 'Dashboard', onNewChatClick }) => {
         // Try to get user from token as fallback
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
+          // Попробуем разные варианты имени из токена
+          let userName = payload.name || payload.username || payload.full_name;
+          if (!userName && (payload.first_name || payload.last_name)) {
+            userName = [payload.first_name, payload.last_name].filter(Boolean).join(' ');
+          }
+          if (!userName && payload.email) {
+            userName = payload.email.split('@')[0];
+          }
+          if (!userName) {
+            userName = 'User';
+          }
+          
           const userFromToken = {
             id: payload.sub || payload.id,
-            name: payload.name || payload.username || payload.email?.split('@')[0] || 'User',
+            name: userName,
             email: payload.email,
             role: payload.role || 'admin'
           };
           setUser(userFromToken);
-          console.log('Using user data from JWT token as fallback');
+          console.log('Using user data from JWT token as fallback:', userFromToken);
         } catch (tokenErr) {
           console.error('Failed to decode token:', tokenErr);
         }
