@@ -1621,9 +1621,9 @@ const InboxPage = () => {
                           sx={{
                             p: isGrouped ? 1.5 : 2,
                             pt: isGrouped && msg.direction === 'in' ? 0.5 : (isGrouped ? 1.5 : 2),
-                            maxWidth: '70%',
-                            width: 'fit-content',
+                            maxWidth: 'min(70%, 600px)',
                             minWidth: 0,
+                            width: 'fit-content',
                             backgroundColor: msg.direction === 'out' ? '#E1BEE7' : 'white', // Очень светло-фиолетовый для исходящих, белый для входящих
                             color: msg.direction === 'out' ? '#6A1B9A' : 'text.primary', // Фиолетовый текст вместо белого для лучшей читаемости
                             border: msg.direction === 'in' ? '1px solid #e0e0e0' : '2px solid #BA68C8', // Фиолетовая рамка для исходящих
@@ -1634,15 +1634,33 @@ const InboxPage = () => {
                             overflow: 'hidden',
                             position: 'relative',
                             borderRadius: isGrouped ? '12px' : '16px', // Меньше скругление для сгруппированных
+                            boxSizing: 'border-box',
+                            '& > *': {
+                              maxWidth: '100% !important',
+                              wordBreak: 'break-word !important',
+                              overflowWrap: 'break-word !important',
+                              whiteSpace: 'normal !important',
+                            },
+                            '& p, & div, & span, & a': {
+                              maxWidth: '100%',
+                              wordBreak: 'break-word',
+                              overflowWrap: 'break-word',
+                              whiteSpace: 'normal',
+                            },
                             '& .message-link': {
                               wordBreak: 'break-all',
                               overflowWrap: 'anywhere',
+                              maxWidth: '100%',
+                              display: 'inline-block',
                               '& a': {
                                 color: msg.direction === 'out' ? '#6A1B9A' : '#9C27B0', // Темно-фиолетовый для исходящих (лучше читается), фиолетовый для входящих
                                 textDecoration: 'underline',
                                 fontWeight: 500, // Чуть жирнее для лучшей читаемости
-                                wordBreak: 'break-all',
-                                overflowWrap: 'anywhere',
+                                wordBreak: 'break-all !important',
+                                overflowWrap: 'anywhere !important',
+                                maxWidth: '100%',
+                                display: 'inline-block',
+                                whiteSpace: 'normal',
                                 '&:hover': {
                                   opacity: 0.7,
                                   textDecoration: 'underline',
@@ -1825,7 +1843,27 @@ const InboxPage = () => {
                                   overflowWrap: 'break-word',
                                   wordBreak: 'break-word',
                                   maxWidth: '100%',
+                                  width: '100%',
                                   overflow: 'hidden',
+                                  display: 'block',
+                                  boxSizing: 'border-box',
+                                  '& *': {
+                                    maxWidth: '100%',
+                                    wordBreak: 'break-word',
+                                    overflowWrap: 'break-word',
+                                  },
+                                  '& .message-link': {
+                                    wordBreak: 'break-all',
+                                    overflowWrap: 'anywhere',
+                                    maxWidth: '100%',
+                                    display: 'inline-block',
+                                    '& a': {
+                                      wordBreak: 'break-all',
+                                      overflowWrap: 'anywhere',
+                                      maxWidth: '100%',
+                                      display: 'inline-block',
+                                    }
+                                  },
                                 }}
                               >
                                 <Linkify
@@ -1864,7 +1902,15 @@ const InboxPage = () => {
                                           href={url} 
                                           target="_blank" 
                                           rel="noopener noreferrer"
-                                          sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                                          sx={{ 
+                                            color: 'primary.main', 
+                                            textDecoration: 'none', 
+                                            wordBreak: 'break-all',
+                                            overflowWrap: 'anywhere',
+                                            display: 'block',
+                                            maxWidth: '100%',
+                                            '&:hover': { textDecoration: 'underline' } 
+                                          }}
                                         >
                                           {url}
                                         </Typography>
