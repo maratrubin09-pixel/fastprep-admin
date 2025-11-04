@@ -26,10 +26,10 @@ export class NylasService {
     private s3Service: S3Service
   ) {
     const clientId = process.env.NYLAS_CLIENT_ID;
-    const clientSecret = process.env.NYLAS_CLIENT_SECRET;
+    const clientSecret = process.env.NYLAS_CLIENT_SECRET || process.env.NYLAS_API_KEY;
 
     if (!clientId || !clientSecret) {
-      this.logger.warn('⚠️ NYLAS_CLIENT_ID or NYLAS_CLIENT_SECRET not set');
+      this.logger.warn('⚠️ NYLAS_CLIENT_ID or NYLAS_CLIENT_SECRET/NYLAS_API_KEY not set');
     }
 
     this.redis = redisClient;
@@ -89,7 +89,8 @@ export class NylasService {
     grantId: string;
   }> {
     const clientId = process.env.NYLAS_CLIENT_ID;
-    const clientSecret = process.env.NYLAS_CLIENT_SECRET;
+    // In Nylas v3, API Key can be used as client_secret for OAuth
+    const clientSecret = process.env.NYLAS_CLIENT_SECRET || process.env.NYLAS_API_KEY;
 
     if (!clientId || !clientSecret) {
       throw new Error('Nylas credentials not configured');
@@ -133,7 +134,9 @@ export class NylasService {
     expiresIn: number;
   }> {
     const clientId = process.env.NYLAS_CLIENT_ID;
-    const clientSecret = process.env.NYLAS_CLIENT_SECRET;
+    // In Nylas v3: API Key can be used as client_secret for OAuth flow
+    // If NYLAS_CLIENT_SECRET is not set, use NYLAS_API_KEY
+    const clientSecret = process.env.NYLAS_CLIENT_SECRET || process.env.NYLAS_API_KEY;
 
     if (!clientId || !clientSecret) {
       throw new Error('Nylas credentials not configured');

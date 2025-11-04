@@ -56,6 +56,10 @@ services:
         sync: false
       - key: NYLAS_CLIENT_SECRET
         sync: false
+        # Note: If Client Secret is not available, use NYLAS_API_KEY instead
+      - key: NYLAS_API_KEY
+        sync: false
+        # Alternative to NYLAS_CLIENT_SECRET for OAuth in Nylas v3
       - key: NYLAS_REDIRECT_URI
         value: https://admin.fastprepusa.com/api/nylas/oauth/callback
       - key: NYLAS_WEBHOOK_SECRET
