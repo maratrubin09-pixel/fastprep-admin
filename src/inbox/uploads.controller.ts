@@ -152,29 +152,29 @@ export class UploadsController {
     }
 
     try {
-      // Если запрос с ?proxy=true, проксируем через backend для обхода CORS
-      if (req.query?.proxy === 'true') {
-        // Используем getObject напрямую из S3Service
-        const { body, contentType } = await this.s3.getObject(key);
-        
-        res.setHeader('Content-Type', contentType || 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        return res.send(body);
-      }
-
-      // Получаем presigned URL для скачивания (7200 секунд = 2 часа) - увеличен для надежности
-      const downloadUrl = await this.s3.createPresignedGet(key, 7200);
-      
-      // Если запрос с ?url=true, возвращаем JSON (для изображений в img src)
+      // Если запрос с ?url=true, возвращаем JSON с presigned URL (для изображений в img src)
       if (req.query?.url === 'true') {
+        const downloadUrl = await this.s3.createPresignedGet(key, 7200);
         return res.json({ url: downloadUrl });
       }
+
+      // По умолчанию проксируем через backend для обхода CORS при скачивании
+      // Если запрос с ?direct=true, используем редирект (для случаев когда CORS настроен)
+      if (req.query?.direct === 'true') {
+        const downloadUrl = await this.s3.createPresignedGet(key, 7200);
+        res.redirect(downloadUrl);
+        return;
+      }
+
+      // Проксируем через backend (по умолчанию для скачивания)
+      const { body, contentType } = await this.s3.getObject(key);
       
-      // Иначе редиректим на presigned URL (для скачивания)
-      res.redirect(downloadUrl);
+      res.setHeader('Content-Type', contentType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      return res.send(body);
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Failed to generate download URL');
     }
