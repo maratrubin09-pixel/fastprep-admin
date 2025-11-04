@@ -20,7 +20,7 @@ export class NotesController {
    */
   @Get('conversations/:id/notes')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.notes.read')
+  @RequirePerm('inbox.view')
   async getNote(@Param('id') conversationId: string, @Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {
@@ -37,7 +37,7 @@ export class NotesController {
    */
   @Post('conversations/:id/notes')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.notes.write')
+  @RequirePerm('inbox.view')
   async upsertNote(
     @Param('id') conversationId: string,
     @Body() body: UpsertNoteDto,
@@ -72,7 +72,7 @@ export class NotesController {
    */
   @Delete('conversations/:id/notes')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.notes.write')
+  @RequirePerm('inbox.view')
   async deleteNote(@Param('id') conversationId: string, @Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {

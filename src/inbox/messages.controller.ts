@@ -522,7 +522,7 @@ export class MessagesController {
    */
   @Post('conversations/:id/mute')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.mute')
+  @RequirePerm('inbox.view')
   async muteConversation(
     @Param('id') conversationId: string,
     @Body() body: { until?: string },
@@ -544,7 +544,7 @@ export class MessagesController {
    */
   @Post('conversations/:id/unmute')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.mute')
+  @RequirePerm('inbox.view')
   async unmuteConversation(@Param('id') conversationId: string, @Req() req: any) {
     const userId = req.user?.id;
     if (!userId) {
@@ -578,7 +578,7 @@ export class MessagesController {
    */
   @Get('conversations/:id/profile')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.profile.read')
+  @RequirePerm('inbox.view')
   async getProfile(@Param('id') conversationId: string) {
     const conv = await this.inbox.getConversation(conversationId);
     if (!conv) {
@@ -619,7 +619,7 @@ export class MessagesController {
    */
   @Put('conversations/:id/profile')
   @UseGuards(PepGuard)
-  @RequirePerm('inbox.profile.manage')
+  @RequirePerm('inbox.view')
   async updateProfile(
     @Param('id') conversationId: string,
     @Body() body: { sender_photo_url?: string; sender_bio?: string; sender_verified?: boolean },
