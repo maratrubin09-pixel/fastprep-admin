@@ -140,6 +140,7 @@ export class UploadsController {
    * GET /api/inbox/uploads/download/:key
    * Получить presigned URL для скачивания файла или напрямую скачать файл
    * Если есть query параметр ?url=true, возвращает JSON с URL вместо редиректа
+   * Если есть query параметр ?proxy=true, проксирует файл через backend (для обхода CORS)
    */
   @Get('download/:key(*)')
   @UseGuards(PepGuard)
@@ -151,6 +152,24 @@ export class UploadsController {
     }
 
     try {
+      // Если запрос с ?proxy=true, проксируем через backend для обхода CORS
+      if (req.query?.proxy === 'true') {
+        const downloadUrl = await this.s3.createPresignedGet(key, 900); // 15 минут для прокси
+        const response = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
+        
+        // Определяем Content-Type из заголовков или из расширения файла
+        const contentType = response.headers['content-type'] || 
+                          response.headers['Content-Type'] || 
+                          'application/octet-stream';
+        
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        return res.send(Buffer.from(response.data));
+      }
+
       // Получаем presigned URL для скачивания (7200 секунд = 2 часа) - увеличен для надежности
       const downloadUrl = await this.s3.createPresignedGet(key, 7200);
       
