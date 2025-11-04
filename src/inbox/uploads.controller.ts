@@ -158,22 +158,19 @@ export class UploadsController {
         return res.json({ url: downloadUrl });
       }
 
-      // По умолчанию проксируем через backend для обхода CORS при скачивании
-      // Если запрос с ?direct=true, используем редирект (для случаев когда CORS настроен)
-      if (req.query?.direct === 'true') {
-        const downloadUrl = await this.s3.createPresignedGet(key, 7200);
-        res.redirect(downloadUrl);
-        return;
-      }
-
-      // Проксируем через backend (по умолчанию для скачивания)
+      // Всегда проксируем через backend для скачивания (обход CORS и сохранение авторизации)
+      // НЕ используем res.redirect() так как он теряет заголовки авторизации
       const { body, contentType } = await this.s3.getObject(key);
       
+      // Определяем имя файла из ключа
+      const filename = decodeURIComponent(key.split('/').pop() || 'file');
+      
       res.setHeader('Content-Type', contentType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Cache-Control', 'no-cache');
       return res.send(body);
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Failed to generate download URL');
