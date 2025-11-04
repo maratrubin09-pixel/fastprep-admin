@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const class_validator_1 = require("class-validator");
 const s3_service_1 = require("../storage/s3.service");
 const inbox_service_1 = require("./inbox.service");
+const telegram_service_1 = require("../messengers/telegram/telegram.service");
 const pep_guard_1 = require("../authz/pep.guard");
 // Расширенный список разрешенных типов (должен совпадать с uploads.controller.ts)
 const ALLOWED_TYPES = [
@@ -47,20 +48,34 @@ __decorate([
 let MessagesController = class MessagesController {
     s3;
     inbox;
-    constructor(s3, inbox) {
+    telegramService;
+    constructor(s3, inbox, telegramService) {
         this.s3 = s3;
         this.inbox = inbox;
+        this.telegramService = telegramService;
     }
     /**
      * GET /api/inbox/conversations
-     * Get all conversations for the current user
+     * Get all conversations for the current user (excluding archived)
+     * @query platform Optional platform filter (e.g., 'telegram', 'whatsapp')
      */
-    async getConversations(req) {
+    async getConversations(req, platform) {
         const userId = req.user?.id;
         if (!userId) {
             throw new common_1.BadRequestException('User not authenticated');
         }
-        return await this.inbox.getAllConversations();
+        return await this.inbox.getAllConversations(platform);
+    }
+    /**
+     * GET /api/inbox/conversations/archived
+     * Get all archived conversations
+     */
+    async getArchivedConversations(req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        return await this.inbox.getArchivedConversations();
     }
     /**
      * GET /api/inbox/conversations/:id/messages
@@ -127,8 +142,93 @@ let MessagesController = class MessagesController {
         };
     }
     /**
+     * POST /api/inbox/conversations/:id/archive
+     * Archive a conversation
+     */
+    async archiveConversation(threadId, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        await this.inbox.archiveConversation(threadId);
+        return { success: true };
+    }
+    /**
+     * PUT /api/inbox/conversations/:id
+     * Update conversation (e.g., custom_name)
+     */
+    async updateConversation(threadId, body, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        await this.inbox.updateConversation(threadId, body);
+        return { success: true };
+    }
+    /**
+     * POST /api/inbox/telegram/find-and-start
+     * Find and start a Telegram chat by username or phone
+     */
+    async findAndStartChat(body, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        if (!body.username && !body.phone) {
+            throw new common_1.BadRequestException('Either username or phone must be provided');
+        }
+        try {
+            // Find user in Telegram
+            const userData = await this.telegramService.findAndStartChat(body.username, body.phone);
+            // Create or find conversation thread
+            const channelId = `telegram:${userData.userId}`;
+            const thread = await this.inbox.findOrCreateThread({
+                channel_id: channelId,
+                platform: 'telegram',
+                chat_title: userData.chatTitle,
+                chat_type: 'private',
+                telegram_peer_id: userData.telegramPeerId,
+                sender_phone: userData.phone,
+                sender_username: userData.username,
+                sender_first_name: userData.firstName,
+                sender_last_name: userData.lastName,
+            });
+            return {
+                success: true,
+                conversation: thread,
+                user: userData,
+            };
+        }
+        catch (error) {
+            throw new common_1.BadRequestException(error.message || 'Failed to find and start chat');
+        }
+    }
+    /**
+     * GET /api/inbox/conversations/trash
+     * Get all deleted conversations
+     */
+    async getDeletedConversations(req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        return await this.inbox.getDeletedConversations();
+    }
+    /**
+     * POST /api/inbox/conversations/:id/restore
+     * Restore a deleted conversation
+     */
+    async restoreConversation(threadId, req) {
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new common_1.BadRequestException('User not authenticated');
+        }
+        await this.inbox.restoreConversation(threadId);
+        return { success: true };
+    }
+    /**
      * DELETE /api/inbox/conversations/:id
-     * Удалить чат (для ручного удаления "Unknown" чатов)
+     * Удалить чат (soft delete для корзины)
      */
     async deleteConversation(threadId, req) {
         const userId = req.user?.id;
@@ -144,10 +244,20 @@ __decorate([
     (0, common_1.UseGuards)(pep_guard_1.PepGuard),
     (0, pep_guard_1.RequirePerm)('inbox.view'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('platform')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "getConversations", null);
+__decorate([
+    (0, common_1.Get)('conversations/archived'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
-], MessagesController.prototype, "getConversations", null);
+], MessagesController.prototype, "getArchivedConversations", null);
 __decorate([
     (0, common_1.Get)('conversations/:id/messages'),
     (0, common_1.UseGuards)(pep_guard_1.PepGuard),
@@ -170,6 +280,56 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], MessagesController.prototype, "sendMessage", null);
 __decorate([
+    (0, common_1.Post)('conversations/:id/archive'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "archiveConversation", null);
+__decorate([
+    (0, common_1.Put)('conversations/:id'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "updateConversation", null);
+__decorate([
+    (0, common_1.Post)('telegram/find-and-start'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.send_message'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "findAndStartChat", null);
+__decorate([
+    (0, common_1.Get)('conversations/trash'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "getDeletedConversations", null);
+__decorate([
+    (0, common_1.Post)('conversations/:id/restore'),
+    (0, common_1.UseGuards)(pep_guard_1.PepGuard),
+    (0, pep_guard_1.RequirePerm)('inbox.view'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], MessagesController.prototype, "restoreConversation", null);
+__decorate([
     (0, common_1.Delete)('conversations/:id'),
     (0, common_1.UseGuards)(pep_guard_1.PepGuard),
     (0, pep_guard_1.RequirePerm)('inbox.view'),
@@ -181,7 +341,9 @@ __decorate([
 ], MessagesController.prototype, "deleteConversation", null);
 exports.MessagesController = MessagesController = __decorate([
     (0, common_1.Controller)('inbox'),
+    __param(2, (0, common_1.Inject)((0, common_1.forwardRef)(() => telegram_service_1.TelegramService))),
     __metadata("design:paramtypes", [s3_service_1.S3Service,
-        inbox_service_1.InboxService])
+        inbox_service_1.InboxService,
+        telegram_service_1.TelegramService])
 ], MessagesController);
 //# sourceMappingURL=messages.controller.js.map

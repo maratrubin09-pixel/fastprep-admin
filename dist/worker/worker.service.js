@@ -11,9 +11,6 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkerService = void 0;
 const common_1 = require("@nestjs/common");
@@ -22,7 +19,7 @@ const db_module_1 = require("../db/db.module");
 const metrics_service_1 = require("./metrics.service");
 const alerts_service_1 = require("./alerts.service");
 const telegram_service_1 = require("../messengers/telegram/telegram.service");
-const axios_1 = __importDefault(require("axios"));
+const backend_http_client_1 = require("../utils/backend-http-client");
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
 const BASE_BACKOFF_MS = Number(process.env.OUTBOX_BASE_BACKOFF_MS || 1000);
 const MAX_BACKOFF_MS = Number(process.env.OUTBOX_MAX_BACKOFF_MS || 60000);
@@ -237,23 +234,22 @@ let WorkerService = class WorkerService {
             return { success: false, error: 'TG_ADAPTER_URL or TG_ADAPTER_TOKEN not set' };
         }
         try {
-            const response = await fetch(`${url}/api/send`, {
-                method: 'POST',
+            const tgAdapterClient = (0, backend_http_client_1.createBackendHttpClient)(url);
+            const data = await tgAdapterClient.post('/api/send', { conversationId, text, objectKey }, {
                 headers: {
-                    'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ conversationId, text, objectKey }),
             });
-            if (!response.ok) {
-                const errText = await response.text();
-                return { success: false, error: `HTTP ${response.status}: ${errText}` };
-            }
-            const data = await response.json();
             return { success: true, externalMessageId: data.messageId || 'unknown' };
         }
         catch (err) {
-            return { success: false, error: err.message };
+            const errorMessage = err.response?.data?.message || err.message || 'Unknown error';
+            return {
+                success: false,
+                error: err.response?.status
+                    ? `HTTP ${err.response.status}: ${errorMessage}`
+                    : errorMessage,
+            };
         }
     }
     /**
@@ -281,14 +277,14 @@ let WorkerService = class WorkerService {
                 console.warn('⚠️ BACKEND_URL or SERVICE_JWT not set, skipping status update notification');
                 return;
             }
-            await axios_1.default.post(`${backendUrl}/api/inbox/events/message-status`, {
+            const backendClient = (0, backend_http_client_1.createBackendHttpClient)(backendUrl);
+            await backendClient.post('/api/inbox/events/message-status', {
                 conversationId,
                 messageId,
                 status,
             }, {
                 headers: {
-                    'Authorization': `Bearer ${serviceJwt}`,
-                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${serviceJwt}`,
                 },
             });
         }

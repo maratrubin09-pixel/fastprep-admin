@@ -4,7 +4,6 @@ import { StringSession } from 'telegram/sessions';
 import { NewMessage } from 'telegram/events';
 import { Api } from 'telegram/tl';
 import bigInt from 'big-integer';
-import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -12,6 +11,7 @@ import { Gauge, register } from 'prom-client';
 import { S3Service } from '../../storage/s3.service';
 import { v4 as uuidv4 } from 'uuid';
 import { get } from 'https';
+import { createBackendHttpClient } from '../../utils/backend-http-client';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -709,14 +709,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const url = `${backendUrl}/api/inbox/events/telegram`;
-      this.logger.debug(`📡 Sending to: ${url}`);
+      this.logger.debug(`📡 Sending to: ${backendUrl}/api/inbox/events/telegram`);
       this.logger.debug(`🔑 Service JWT (first 10 chars): ${serviceJwt.substring(0, 10)}...`);
 
-      await axios.post(url, payload, {
+      const backendClient = createBackendHttpClient(backendUrl);
+      await backendClient.post('/api/inbox/events/telegram', payload, {
         headers: {
           Authorization: `Bearer ${serviceJwt}`,
-          'Content-Type': 'application/json',
         },
       });
 
