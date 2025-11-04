@@ -83,14 +83,19 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /**
    * Broadcast user status change to relevant conversations
+   * Фильтрует события - отправляет только пользователям с доступом к inbox
    */
   private async broadcastUserStatus(userId: string, status: 'online' | 'offline'): Promise<void> {
     const sockets = await this.server.in('/ws').fetchSockets();
+    
     for (const socket of sockets) {
       const sData = (socket as any).data as SocketData | undefined;
       if (!sData || sData.userId === userId) continue;
 
-      socket.emit(`user.${status}`, { user_id: userId });
+      // Отправляем только пользователям с правом inbox.view
+      if (sData.ep.permissions.includes('inbox.view')) {
+        socket.emit(`user.${status}`, { user_id: userId });
+      }
     }
   }
 

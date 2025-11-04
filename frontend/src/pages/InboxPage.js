@@ -18,6 +18,7 @@ import {
   Stack,
   IconButton,
   InputAdornment,
+  Tooltip,
 } from '@mui/material';
 import {
   Telegram as TelegramIcon,
@@ -1032,6 +1033,15 @@ const InboxPage = () => {
     return channelId.split(':')[0] || 'unknown';
   };
 
+  // Конвертация UTC в ET (Eastern Time)
+  const convertToET = (date) => {
+    // ET = UTC-5 (EST) или UTC-4 (EDT)
+    // Упрощенно: используем UTC-5 для EST
+    const etOffset = -5 * 60; // минуты
+    const etDate = new Date(date.getTime() + etOffset * 60 * 1000);
+    return etDate;
+  };
+
   const formatTime = (timestamp, showTime = false) => {
     if (!timestamp) return '';
     const date = new Date(timestamp);
@@ -1041,42 +1051,73 @@ const InboxPage = () => {
     const diffHours = Math.floor(diff / 3600000);
     const diffDays = Math.floor(diff / 86400000);
     
+    // Конвертируем в ET для отображения
+    const etDate = convertToET(date);
+    const localTime = date.toLocaleString('en-US', { 
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      hour: 'numeric', 
+      minute: '2-digit', 
+      hour12: true 
+    });
+    const etTime = etDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    
+    let result = '';
+    
     // Today - show time
     if (diffDays === 0) {
-      if (diffMinutes < 1) return 'Just now';
-      if (diffMinutes < 60) return `${diffMinutes}m ago`;
-      if (diffHours < 24) return `${diffHours}h ago`;
-      if (showTime) {
-        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      if (diffMinutes < 1) result = 'Just now';
+      else if (diffMinutes < 60) result = `${diffMinutes}m ago`;
+      else if (diffHours < 24) result = `${diffHours}h ago`;
+      else if (showTime) {
+        result = `${etTime} ET`;
+      } else {
+        result = 'Today';
       }
-      return 'Today';
     }
-    
     // Yesterday
-    if (diffDays === 1) {
+    else if (diffDays === 1) {
       if (showTime) {
-        return `Yesterday ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+        result = `Yesterday ${etTime} ET`;
+      } else {
+        result = 'Yesterday';
       }
-      return 'Yesterday';
     }
-    
     // Within this week
-    if (diffDays < 7) {
+    else if (diffDays < 7) {
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const dayName = days[date.getDay()];
+      const dayName = days[etDate.getDay()];
       if (showTime) {
-        return `${dayName} ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+        result = `${dayName} ${etTime} ET`;
+      } else {
+        result = dayName;
       }
-      return dayName;
     }
-    
     // Older than a week - show date
-    if (diffDays < 365) {
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    else if (diffDays < 365) {
+      result = etDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    // Older than a year
+    else {
+      result = etDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     }
     
-    // Older than a year
-    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    // Сохраняем tooltip в data-атрибуте для использования в Tooltip компоненте
+    return result;
+  };
+
+  // Получить tooltip для timestamp (локальное время)
+  const getTimeTooltip = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleString('en-US', { 
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      hour: 'numeric', 
+      minute: '2-digit', 
+      hour12: true,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
   };
 
   const handleEditName = () => {
@@ -1394,9 +1435,11 @@ const InboxPage = () => {
                       }
                       secondary={
                         <Box display="flex" justifyContent="space-between" alignItems="center">
-                          <Typography variant="caption">
-                            {formatTime(conv.last_message_at || conv.created_at)}
-                          </Typography>
+                          <Tooltip title={`Local: ${getTimeTooltip(conv.last_message_at || conv.created_at)}`} arrow>
+                            <Typography variant="caption">
+                              {formatTime(conv.last_message_at || conv.created_at)}
+                            </Typography>
+                          </Tooltip>
                           {conv.unread_count > 0 && (
                             <Chip
                               label={conv.unread_count}
@@ -1479,7 +1522,9 @@ const InboxPage = () => {
                           }
                           secondary={
                             <Typography variant="caption" color="text.secondary">
-                              {formatTime(msg.created_at)} • {platform}
+                              <Tooltip title={`Local: ${getTimeTooltip(msg.created_at)}`} arrow>
+                                <span>{formatTime(msg.created_at)}</span>
+                              </Tooltip> • {platform}
                             </Typography>
                           }
                         />
@@ -2150,7 +2195,9 @@ const InboxPage = () => {
                                 opacity: 0.7,
                               }}
                             >
-                              {formatTime(msg.created_at, true)}
+                              <Tooltip title={`Local: ${getTimeTooltip(msg.created_at)}`} arrow>
+                                <span>{formatTime(msg.created_at, true)}</span>
+                              </Tooltip>
                               {msg.edited_at && ' (edited)'}
                             </Typography>
                             {msg.direction === 'out' && msg.delivery_status && (
