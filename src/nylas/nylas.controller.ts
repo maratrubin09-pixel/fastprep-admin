@@ -118,6 +118,21 @@ export class NylasController {
   }
 
   /**
+   * GET /api/nylas/webhook?challenge=xxx
+   * Verify webhook endpoint (Nylas challenge)
+   */
+  @Public()
+  @Get('webhook')
+  async webhookChallenge(@Query('challenge') challenge: string, @Res() res: Response) {
+    if (!challenge) {
+      return res.status(400).json({ error: 'Missing challenge parameter' });
+    }
+    this.logger.log(`✅ Webhook challenge received: ${challenge}`);
+    // Return challenge as plain text (Nylas requirement)
+    return res.status(200).send(challenge);
+  }
+
+  /**
    * POST /api/nylas/webhook
    * Handle Nylas webhook events
    * Public endpoint (validated by HMAC signature)
