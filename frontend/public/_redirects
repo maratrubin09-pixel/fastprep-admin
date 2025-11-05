@@ -1,0 +1,3 @@
+# Proxy API requests to backend
+/api/* https://fastprep-admin-api.onrender.com/api/:splat 200
+
