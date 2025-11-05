@@ -124,11 +124,17 @@ export class NylasController {
   @Public()
   @Get('webhook')
   async webhookChallenge(@Query('challenge') challenge: string, @Res() res: Response) {
+    this.logger.log(`🔍 Webhook challenge request received: challenge=${challenge || 'missing'}`);
+    
     if (!challenge) {
+      this.logger.warn('⚠️ Challenge parameter missing');
       return res.status(400).json({ error: 'Missing challenge parameter' });
     }
+    
     this.logger.log(`✅ Webhook challenge received: ${challenge}`);
     // Return challenge as plain text (Nylas requirement)
+    // Important: Set Content-Type header
+    res.setHeader('Content-Type', 'text/plain');
     return res.status(200).send(challenge);
   }
 
