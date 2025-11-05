@@ -65,3 +65,4 @@ CREATE INDEX idx_email_attachments_email_message_id ON email_attachments(email_m
 CREATE INDEX idx_email_attachments_nylas_attachment_id ON email_attachments(nylas_attachment_id);
 CREATE INDEX idx_email_attachments_content_id ON email_attachments(content_id);
 
+
