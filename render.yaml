@@ -5,6 +5,7 @@ services:
     runtime: node
     region: oregon
     plan: starter
+    branch: main
     rootDir: ./
     buildCommand: npm install && npm run build
     startCommand: npm start
