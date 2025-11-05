@@ -19,12 +19,13 @@ const authz_module_1 = require("../authz/authz.module");
 const storage_module_1 = require("../storage/storage.module");
 const inbox_module_1 = require("../inbox/inbox.module");
 const messengers_module_1 = require("../messengers/messengers.module");
+const nylas_module_1 = require("../nylas/nylas.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
-        imports: [redis_module_1.RedisModule, db_module_1.DbModule, auth_module_1.AuthModule, authz_module_1.AuthzModule, storage_module_1.StorageModule, inbox_module_1.InboxModule, messengers_module_1.MessengersModule],
+        imports: [redis_module_1.RedisModule, db_module_1.DbModule, auth_module_1.AuthModule, authz_module_1.AuthzModule, storage_module_1.StorageModule, inbox_module_1.InboxModule, messengers_module_1.MessengersModule, nylas_module_1.NylasModule],
         controllers: [health_controller_1.HealthController, init_db_controller_1.InitDbController, update_admin_email_controller_1.UpdateAdminEmailController, debug_controller_1.DebugController],
     })
 ], AppModule);

@@ -10,9 +10,10 @@ import { AuthzModule } from '../authz/authz.module';
 import { StorageModule } from '../storage/storage.module';
 import { InboxModule } from '../inbox/inbox.module';
 import { MessengersModule } from '../messengers/messengers.module';
+import { NylasModule } from '../nylas/nylas.module';
 
 @Module({
-  imports: [RedisModule, DbModule, AuthModule, AuthzModule, StorageModule, InboxModule, MessengersModule],
+  imports: [RedisModule, DbModule, AuthModule, AuthzModule, StorageModule, InboxModule, MessengersModule, NylasModule],
   controllers: [HealthController, InitDbController, UpdateAdminEmailController, DebugController],
 })
 export class AppModule {}

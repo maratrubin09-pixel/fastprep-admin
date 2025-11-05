@@ -4,7 +4,7 @@ import { PG_POOL } from '../db/db.module';
 import { MetricsService } from './metrics.service';
 import { AlertsService } from './alerts.service';
 import { TelegramService } from '../messengers/telegram/telegram.service';
-import axios from 'axios';
+import { createBackendHttpClient } from '../utils/backend-http-client';
 
 const MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS || 5);
 const BASE_BACKOFF_MS = Number(process.env.OUTBOX_BASE_BACKOFF_MS || 1000);
@@ -287,24 +287,26 @@ export class WorkerService implements OnModuleDestroy {
     }
 
     try {
-      const response = await fetch(`${url}/api/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ conversationId, text, objectKey }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        return { success: false, error: `HTTP ${response.status}: ${errText}` };
-      }
-
-      const data: any = await response.json();
+      const tgAdapterClient = createBackendHttpClient(url);
+      const data: any = await tgAdapterClient.post(
+        '/api/send',
+        { conversationId, text, objectKey },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
       return { success: true, externalMessageId: data.messageId || 'unknown' };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      const errorMessage =
+        err.response?.data?.message || err.message || 'Unknown error';
+      return {
+        success: false,
+        error: err.response?.status
+          ? `HTTP ${err.response.status}: ${errorMessage}`
+          : errorMessage,
+      };
     }
   }
 
@@ -344,8 +346,9 @@ export class WorkerService implements OnModuleDestroy {
         return;
       }
 
-      await axios.post(
-        `${backendUrl}/api/inbox/events/message-status`,
+      const backendClient = createBackendHttpClient(backendUrl);
+      await backendClient.post(
+        '/api/inbox/events/message-status',
         {
           conversationId,
           messageId,
@@ -353,8 +356,7 @@ export class WorkerService implements OnModuleDestroy {
         },
         {
           headers: {
-            'Authorization': `Bearer ${serviceJwt}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${serviceJwt}`,
           },
         }
       );

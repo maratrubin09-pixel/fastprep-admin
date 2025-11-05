@@ -52,6 +52,24 @@ services:
         value: https://fastprep-tg-adapter.onrender.com
       - key: TG_ADAPTER_TOKEN
         sync: false
+      - key: NYLAS_CLIENT_ID
+        sync: false
+      - key: NYLAS_CLIENT_SECRET
+        sync: false
+        # Note: If Client Secret is not available, use NYLAS_API_KEY instead
+      - key: NYLAS_API_KEY
+        sync: false
+        # Alternative to NYLAS_CLIENT_SECRET for OAuth in Nylas v3
+      - key: NYLAS_REDIRECT_URI
+        value: https://admin.fastprepusa.com/api/nylas/oauth/callback
+      - key: NYLAS_WEBHOOK_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: FEATURE_EMAIL_MODULE
+        value: 'true'
+      - key: EMAIL_PROVIDER
+        value: nylas
     healthCheckPath: /api/health
 
   # Outbox Worker

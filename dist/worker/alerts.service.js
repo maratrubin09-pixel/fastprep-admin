@@ -16,6 +16,7 @@ exports.AlertsService = void 0;
 const common_1 = require("@nestjs/common");
 const pg_1 = require("pg");
 const db_module_1 = require("../db/db.module");
+const backend_http_client_1 = require("../utils/backend-http-client");
 let AlertsService = class AlertsService {
     pool;
     lastAlertTime = 0;
@@ -53,10 +54,12 @@ let AlertsService = class AlertsService {
         const slackUrl = process.env.SLACK_WEBHOOK_URL;
         if (slackUrl) {
             try {
-                await fetch(slackUrl, {
+                const slackClient = (0, backend_http_client_1.createBackendHttpClient)();
+                await slackClient.getInstance().request({
                     method: 'POST',
+                    url: slackUrl,
+                    data: { text: message },
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: message }),
                 });
                 console.log('Slack alert sent');
             }

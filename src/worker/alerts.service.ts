@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from '../db/db.module';
+import { createBackendHttpClient } from '../utils/backend-http-client';
 
 @Injectable()
 export class AlertsService {
@@ -44,10 +45,12 @@ export class AlertsService {
     const slackUrl = process.env.SLACK_WEBHOOK_URL;
     if (slackUrl) {
       try {
-        await fetch(slackUrl, {
+        const slackClient = createBackendHttpClient();
+        await slackClient.getInstance().request({
           method: 'POST',
+          url: slackUrl,
+          data: { text: message },
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: message }),
         });
         console.log('Slack alert sent');
       } catch (err) {
